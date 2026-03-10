@@ -38,6 +38,139 @@ npm start
 ```
 ### Usage
 Check the demo video at [Demo](https://github.com/lutfia95/RapCluster/blob/main/demo.mp4).
+
+## Clustering Algorithms
+
+RapCluster supports multiple clustering backends so you can compare different assumptions about cluster shape, density, and scale.
+
+### Partition-based methods
+
+#### MiniBatchKMeans
+Fast K-Means variant that updates centroids from small random batches. Useful for larger datasets.
+
+- `n_clusters`: Number of clusters to create.
+- `random_state`: Seed for reproducible runs.
+- `init`: Centroid initialization strategy such as `k-means++`.
+
+Recommended to tune: `n_clusters`, `init`
+
+#### KMeans
+Classic centroid-based clustering that minimizes within-cluster variance.
+
+- `n_clusters`: Number of clusters to create.
+- `random_state`: Seed for reproducibility.
+- `init`: Centroid initialization strategy.
+- `algorithm`: Optimization backend, such as `lloyd` or `elkan`.
+
+Recommended to tune: `n_clusters`, `algorithm`
+
+#### GaussianMixture
+Probabilistic clustering based on a mixture of Gaussian distributions.
+
+- `n_components`: Number of mixture components.
+- `covariance_type`: Shape of the covariance matrices, for example `full` or `diag`.
+- `init_params`: Initialization method, for example `kmeans`.
+
+Recommended to tune: `n_components`, `covariance_type`
+
+### Hierarchical and graph-based methods
+
+#### AgglomerativeClustering
+Bottom-up hierarchical clustering that repeatedly merges the closest groups.
+
+- `n_clusters`: Number of final clusters.
+- `linkage`: Merge criterion such as `ward`, `average`, `complete`, or `single`.
+- `metric`: Distance metric used when comparing samples or clusters.
+
+Recommended to tune: `linkage`, `n_clusters`
+
+Important note: `ward` linkage only works with the `euclidean` metric. The backend enforces this automatically.
+
+#### SpectralClustering
+Graph-based clustering that works well when clusters are non-convex.
+
+- `n_clusters`: Number of clusters to produce.
+- `affinity`: How the similarity graph is built, for example `nearest_neighbors` or `rbf`.
+- `n_neighbors`: Number of neighbors used when `affinity=nearest_neighbors`.
+- `assign_labels`: How final labels are assigned, typically `kmeans` or `discretize`.
+
+Recommended to tune: `affinity`, `n_neighbors`
+
+#### BIRCH
+Efficient clustering for larger datasets using a clustering-feature tree.
+
+- `n_clusters`: Number of final clusters. Can also be left unset in some workflows.
+- `threshold`: Distance threshold used to merge subclusters.
+- `branching_factor`: Maximum number of subclusters per tree node.
+
+Recommended to tune: `threshold`, `n_clusters`
+
+### Density-based methods
+
+#### DBSCAN
+Finds dense regions and labels isolated points as noise.
+
+- `eps`: Maximum distance for two points to be considered neighbors.
+- `min_samples`: Minimum number of nearby points needed for a core point.
+- `metric`: Distance metric used to compute neighborhoods.
+- `algorithm`: Neighbor-search backend.
+
+Recommended to tune: `eps`, `min_samples`
+
+#### HDBSCAN
+Hierarchical density-based clustering that handles varying densities better than DBSCAN.
+
+- `min_cluster_size`: Minimum size allowed for a cluster.
+- `min_samples`: Controls how conservative the density estimate is.
+- `cluster_selection_epsilon`: Extra tolerance for merging nearby clusters.
+- `max_cluster_size`: Optional upper bound for cluster size.
+- `metric`: Distance metric.
+- `cluster_selection_method`: Strategy for extracting clusters, usually `eom` or `leaf`.
+
+Recommended to tune: `min_cluster_size`, `min_samples`
+
+#### OPTICS
+Density-based ordering method that can recover clusters across different density levels.
+
+- `min_samples`: Minimum number of samples in a neighborhood.
+- `xi`: Minimum steepness used to extract clusters from the reachability plot.
+- `min_cluster_size`: Minimum cluster size, given as an integer or fraction of the dataset.
+- `metric`: Distance metric.
+
+Recommended to tune: `xi`, `min_samples`
+
+### Other methods
+
+#### AffinityPropagation
+Message-passing clustering that identifies representative exemplars automatically.
+
+- `damping`: Stabilizes updates during optimization. Must be between `0.5` and `1.0`.
+- `preference`: Controls how many exemplars, and therefore clusters, are likely to be found.
+- `affinity`: Similarity measure used by the algorithm.
+
+Recommended to tune: `preference`, `damping`
+
+#### MeanShift
+Mode-seeking clustering that does not require predefining the number of clusters.
+
+- `bandwidth`: Radius of the local density window.
+- `cluster_all`: Whether every point must be assigned to a cluster.
+
+Recommended to tune: `bandwidth`
+
+## Parameter Interpretation
+
+Some parameter names appear across multiple algorithms:
+
+- `n_clusters` or `n_components`: Target number of output groups. Higher values usually produce finer splits.
+- `metric`: The distance function used to compare samples, for example `euclidean`, `manhattan`, or `cosine`.
+- `random_state`: Fixed seed for reproducible results.
+- `init` or `init_params`: How model centroids or components are initialized before optimization.
+- `min_samples`: Density threshold controlling how many nearby points are needed before a region is considered dense.
+- `threshold`, `bandwidth`, `eps`, `cluster_selection_epsilon`: Scale-sensitive parameters that control how aggressively nearby points or subclusters are merged.
+
+In practice, the most important parameters to adjust are usually the target cluster count for centroid or hierarchical methods, and the density thresholds for DBSCAN, HDBSCAN, OPTICS, and MeanShift.
+
 ## License
 MIT license
 ## Contact
