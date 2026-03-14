@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+from __future__ import annotations
 
 import os
 import sys
@@ -14,8 +13,8 @@ from tqdm import tqdm
 import xml.etree.ElementTree as ET
 
 
-Entrez.email = "ahmad.lutfi@fu-berlin.de"
-Entrez.api_key = "15dc7c27a72ffe2edb0909fd2af7dbfe4b0a"
+Entrez.email = "xx.xxxx.xxxxx"
+Entrez.api_key = "xxxx"
 
 YEARS = range(2025, 2026)
 

@@ -1,0 +1,127 @@
+input:
+  file: "example_data.tsv"
+  file_type: "tsv"              # csv | tsv | xlsx
+  name_column: "GeneName"
+  intensity_start_index: 1      # first numeric feature column, 0-based
+
+preprocessing:
+  missing_value_strategy: "zero"    # zero | drop_row
+  log_transform: true               # log2(x + 1)
+  scale: true                       # StandardScaler
+  scale_axis: "row"                 # row = current app behavior
+  drop_all_zero_rows: true
+
+evaluation:
+  clustering_space: "reduced"       # original | reduced
+  evaluation_space: "original"      # original | reduced
+  ignore_noise_for_internal_scores: true
+  small_cluster_threshold: 2
+  repeats: 5
+  random_seeds: [11, 22, 33, 44, 55]
+
+scoring:
+  mode: "balanced"                  # balanced | stability_first | quality_first | coverage_first | fast
+  weights:
+    silhouette: 0.20
+    calinski_harabasz: 0.10
+    davies_bouldin: 0.10
+    stability_ari: 0.30
+    assigned_fraction: 0.15
+    singleton_penalty: 0.05
+    cluster_count_penalty: 0.05
+    runtime_penalty: 0.05
+  penalties:
+    one_cluster: true
+    too_many_noise_points: true
+    too_many_singletons: true
+    degenerate_solution: true
+
+dimensionality_reduction:
+  enabled: false
+  method: "UMAP"                   # None | UMAP | TSNE | PCA
+  params:
+    n_components: 2
+    n_neighbors: 15
+    min_dist: 0.10
+    metric: "euclidean"
+    random_state: 42
+
+search:
+  strategy: "grid"                 # grid | manual_list
+  max_combinations_per_algorithm: 200
+  top_k_to_report: 10
+  save_all_results: true
+
+algorithms:
+  KMeans:
+    enabled: true
+    param_grid:
+      n_clusters: [2, 3, 4, 5, 6, 8, 10, 12]
+      init: ["k-means++"]
+      algorithm: ["lloyd", "elkan"]
+
+  MiniBatchKMeans:
+    enabled: true
+    param_grid:
+      n_clusters: [2, 3, 4, 5, 6, 8, 10, 12]
+      init: ["k-means++"]
+
+  AgglomerativeClustering:
+    enabled: true
+    param_grid:
+      n_clusters: [2, 3, 4, 5, 6, 8, 10]
+      linkage: ["ward", "average", "complete"]
+      metric: ["euclidean", "manhattan", "cosine"]
+
+  SpectralClustering:
+    enabled: false
+    param_grid:
+      n_clusters: [2, 3, 4, 5, 6, 8, 10]
+      affinity: ["nearest_neighbors", "rbf"]
+      n_neighbors: [5, 10, 15]
+      assign_labels: ["kmeans"]
+
+  DBSCAN:
+    enabled: true
+    param_grid:
+      eps: [0.2, 0.4, 0.6, 0.8, 1.0]
+      min_samples: [3, 5, 8, 10]
+      metric: ["euclidean", "manhattan"]
+
+  HDBSCAN:
+    enabled: true
+    param_grid:
+      min_cluster_size: [2, 3, 5, 8, 10]
+      min_samples: [null, 3, 5, 8]
+      cluster_selection_epsilon: [0.0, 0.05, 0.1]
+      metric: ["euclidean", "manhattan"]
+      cluster_selection_method: ["eom", "leaf"]
+
+  OPTICS:
+    enabled: true
+    param_grid:
+      min_samples: [3, 5, 8, 10]
+      xi: [0.03, 0.05, 0.1]
+      min_cluster_size: [0.03, 0.05, 0.1]
+      metric: ["minkowski", "euclidean"]
+
+  BIRCH:
+    enabled: true
+    param_grid:
+      n_clusters: [null, 2, 3, 4, 5, 6, 8]
+      threshold: [0.2, 0.4, 0.6, 0.8]
+      branching_factor: [25, 50, 100]
+
+  GaussianMixture:
+    enabled: true
+    param_grid:
+      n_components: [2, 3, 4, 5, 6, 8, 10]
+      covariance_type: ["full", "diag", "tied"]
+      init_params: ["kmeans", "random"]
+
+output:
+  output_dir: "rapcluster_results"
+  save_labels_table: true
+  save_ranked_summary: true
+  save_topk_per_algorithm: true
+  save_best_config: true

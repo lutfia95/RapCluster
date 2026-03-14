@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+
 #python text_mining_new.py -i articles -o ./new_output/ --plots --recursive
 import argparse
 import csv
