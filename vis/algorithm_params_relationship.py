@@ -10,6 +10,45 @@ from typing import Dict, List, Tuple
 
 csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 
+
+    # "algorithm": [
+    #     # Core clustering families
+    #     r"\bk[\s-]?means\b",
+    #     r"\bmini[\s-]?batch[\s-]?k[\s-]?means\b",
+    #     r"\bk[\s-]?medoids\b|\bpam\b",
+    #     r"\bfuzzy\s*c[\s-]?means\b|\bc[\s-]?means\b",
+    #     r"\bhierarchical\s+clustering\b|\bagglomerative\s+clustering\b|\bdivisive\s+clustering\b",
+    #     r"\bward(?:'s)?\b\s+method\b",
+    #     r"\bdbscan\b",
+    #     r"\bhdbscan\b",
+    #     r"\boptics\b",
+    #     r"\bmean\s*shift\b",
+    #     r"\bbirch\b",
+    #     r"\bspectral\s+clustering\b",
+    #     r"\baffinity\s+propagation\b",
+    #     r"\bgaussian\s+mixture(?:\s+model)?\b|\bgmm\b|\bmixture\s+model\b",
+    #     r"\bdirichlet\s+process\s+mixture\b|\bdpm\b",
+    #     r"\bself[-\s]?organizing\s+map\b|\bsom\b",
+    #     r"\bneural\s+gas\b",
+    #     r"\bmarkov\s+clustering\b|\bmcl\b",
+
+    #     # Graph/community clustering (very common in modern bio)
+    #     r"\bgraph[-\s]?based\s+clustering\b",
+    #     r"\bcommunity\s+detection\b",
+    #     r"\blouvain\b",
+    #     r"\bleiden\b",
+    #     r"\bshared\s+nearest\s+neighbor\b|\bsnn\b",
+
+    #     # Domain/tool proxies (optional but improves recall in omics-heavy PMC)
+    #     r"\bphenograph\b",
+    #     r"\bseurat\b",
+    #     r"\bscanpy\b",
+    #     r"\bsc3\b",
+
+    #     # Generic mention (keep last; useful but broad)
+    #     r"\bcluster(?:ing|ed|s)?\b",
+    # ],
+
 ALGO_REGEX_TO_LABEL: List[Tuple[str, str]] = [
     (r"\bk[\s-]?means\b", "k-means"),
     (r"\bmini[\s-]?batch[\s-]?k[\s-]?means\b", "mini-batch k-means"),
