@@ -1,0 +1,12 @@
+{
+  "name": "rapcluster",
+  "private": true,
+  "scripts": {
+    "backend": "MPLCONFIGDIR=/tmp/matplotlib conda run --no-capture-output -n clustering_env python app.py",
+    "frontend": "npm start --prefix clustering-frontend",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
