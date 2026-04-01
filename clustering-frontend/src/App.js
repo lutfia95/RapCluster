@@ -688,7 +688,7 @@ function App() {
         if (node.intensities && node.intensities.length > 0) {
             const numDimensions = node.intensities.length;
             linePlotTraces.push({
-                x: Array.from({ length: numDimensions }, (_, i) => `Dim ${i + 1}`),
+                x: Array.from({ length: numDimensions }, (_, i) => `${i + 1}`),
                 y: node.intensities,
                 mode: 'lines',
                 name: node.name,
@@ -792,14 +792,23 @@ function App() {
           style={{ height: '90px', marginRight: '40px' }}
         />
         </div>
-          <h1 style={{ flexGrow: 1, textAlign: 'center', margin: 0 }}>The Cluster at Your Fingertips</h1>
-          <div style={{ width: '70px' }} /> {/* filler to balance the logo space */}
+          <h1 style={{ flexGrow: 1, textAlign: 'center', margin: 0 }}>Clustering at Your Fingertips</h1>
+          <div style={{ width: '100px' }} /> {/* filler to balance the logo space */}
         </div>
       </header>
       <main className="App-main">
         <form onSubmit={handleSubmit} className="clustering-form">
           <section className="input-section">
-            <h2>1. Upload Data</h2>
+          <h2>
+              1. Upload Data{''}
+              <a
+                href="https://raw.githubusercontent.com/lutfia95/RapCluster/main/example_data.tsv"
+                download="example_data.tsv"
+                style={{ fontSize: '0.7em', marginLeft: '8px' }}
+              >
+                (example data)
+              </a>
+            </h2>
             <div className="form-group">
               <label htmlFor="file-upload">Select File (TSV):</label>
               <input 
@@ -813,7 +822,7 @@ function App() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="name-column">Node Name Column:</label>
+              <label htmlFor="name-column">Name of Node Column:</label>
               <input
                 type="text"
                 id="name-column"
@@ -836,7 +845,6 @@ function App() {
               />
             </div>
           </section>
-
           <section className="reduction-section">
             <h2>2. Dimensionality Reduction</h2>
              <p style={{ marginTop: '-10px' }}>
@@ -953,6 +961,20 @@ function App() {
               </div>
             )}
           </section>
+          <p style={{ textAlign: 'left', marginTop: '16px', marginBottom: '0' }}>
+              <a
+                href="https://youtu.be/m7LynlO7T5U"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: '0.95em',
+                  color: '#007bff',
+                  textDecoration: 'none'
+                }}
+              >
+                Watch Youtube Tutorial
+              </a>
+            </p>
 
           <button type="submit" className="submit-button" disabled={loading || !file}>
             {loading ? 'Processing...' : 'Run Clustering'}
