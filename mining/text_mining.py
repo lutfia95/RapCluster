@@ -15,6 +15,11 @@ import xml.etree.ElementTree as ET
 
 from tqdm import tqdm
 
+try:
+    import matplotlib.pyplot as plt
+except Exception:
+    plt = None
+
 
 csv.field_size_limit(sys.maxsize)
 
@@ -121,7 +126,6 @@ DEFAULT_PATTERNS: Dict[str, List[str]] = {
         r"\bself[-\s]?organizing\s+map\b|\bsom\b",
         r"\bneural\s+gas\b",
         r"\bmarkov\s+clustering\b|\bmcl\b",
-        r"\bumap\b|\buniform\s+manifold\s+approximation\s+and\s+projection\b",
 
         # Graph/community clustering (very common in modern bio)
         r"\bgraph[-\s]?based\s+clustering\b",
@@ -171,7 +175,6 @@ DEFAULT_PATTERNS: Dict[str, List[str]] = {
 
         # Spectral
         r"\bn[_\s-]?neighbors\b\s*=\s*\d+\b",
-        r"\bn[_\s-]?neighbors\b",
         r"\bgamma\b\s*=\s*[\deE\.\-]+\b",
 
         # Affinity propagation / mean shift
@@ -185,11 +188,10 @@ DEFAULT_PATTERNS: Dict[str, List[str]] = {
         r"\bkNN\b|\bk\s*nearest\s+neighbors\b",
         r"\bneighbors\b\s*=\s*\d+\b",
 
-        # Embedding parameters often define the space that is clustered.
-        r"\bmin[_\s-]?dist\b",
-        r"\bn[_\s-]?components\b",
-        r"\bperplexity\b",
-        r"\blearning\s*rate\b",
+        # Keep embeddings separate from clustering if you care about purity of "params";
+        # included because many papers report clustering in embedding space.
+        r"\bUMAP\b.*\b(n[_\s-]?neighbors|min[_\s-]?dist)\b",
+        r"\bt-?SNE\b.*\b(perplexity|learning\s*rate)\b",
     ],
 
     "justification": [
@@ -216,7 +218,7 @@ DEFAULT_PATTERNS: Dict[str, List[str]] = {
         r"\bwithin[-\s]?cluster\s+sum\s+of\s+squares\b|\bWCSS\b",
         r"\bbetween[-\s]?cluster\s+variance\b",
         r"\bcluster\s+stability\b|\bstability\s+analysis\b",
-        r"\bbootstrap(?:ping)?\b[^.;:]{0,160}\bcluster\b",
+        r"\bbootstrap(?:ping)?\b.*\bcluster\b",
 
         # External validation / agreement
         r"\badjusted\s+rand\b|\bARI\b",
@@ -294,12 +296,9 @@ def all_matches(text: str, pats: List[re.Pattern], limit_per_pattern: int = 20, 
 def analyze_text(text: str, bank: PatternBank) -> Dict[str, object]:
     algo_found = all_matches(text, bank.algorithm)
     params_found = all_matches(text, bank.params)
-    justification_matches = all_matches(text, bank.justification)
-    evaluation_matches = all_matches(text, bank.evaluation)
-    tuning_matches = all_matches(text, bank.tuning)
-    justification_found = len(justification_matches) > 0
-    evaluation_found = len(evaluation_matches) > 0
-    tuning_found = len(tuning_matches) > 0
+    justification_found = any_match(text, bank.justification)
+    evaluation_found = any_match(text, bank.evaluation)
+    tuning_found = any_match(text, bank.tuning)
 
     # Interpret this as "missing explicit reporting signals" (not definitive misuse).
     missing_params = len(params_found) == 0
@@ -312,11 +311,8 @@ def analyze_text(text: str, bank: PatternBank) -> Dict[str, object]:
         "algorithms_found": ";".join(algo_found),
         "params_found": ";".join(params_found),
         "justification_found": int(justification_found),
-        "justification_matches": ";".join(justification_matches),
         "evaluation_found": int(evaluation_found),
-        "evaluation_matches": ";".join(evaluation_matches),
         "tuning_found": int(tuning_found),
-        "tuning_matches": ";".join(tuning_matches),
         "missing_params": int(missing_params),
         "missing_justification": int(missing_just),
         "missing_evaluation": int(missing_eval),
@@ -412,10 +408,8 @@ def summarize_tsv(tsv_path: Path) -> Dict[str, object]:
 
 
 def plot_yearly_summary(summary_by_year: Dict[str, Dict[str, object]], out_dir: Path) -> None:
-    try:
-        import matplotlib.pyplot as plt
-    except Exception as e:
-        raise RuntimeError("matplotlib not available; install matplotlib or run without --plots") from e
+    if plt is None:
+        raise RuntimeError("matplotlib not available; install matplotlib or run without --plots")
 
     years = sorted(summary_by_year.keys(), key=lambda y: int(y))
     total = [summary_by_year[y]["total_articles"] for y in years]
@@ -468,11 +462,8 @@ def process_year_dir(
             "algorithms_found",
             "params_found",
             "justification_found",
-            "justification_matches",
             "evaluation_found",
-            "evaluation_matches",
             "tuning_found",
-            "tuning_matches",
             "missing_params",
             "missing_justification",
             "missing_evaluation",
@@ -498,11 +489,8 @@ def process_year_dir(
         "algorithms_found",
         "params_found",
         "justification_found",
-        "justification_matches",
         "evaluation_found",
-        "evaluation_matches",
         "tuning_found",
-        "tuning_matches",
         "missing_params",
         "missing_justification",
         "missing_evaluation",
@@ -535,11 +523,8 @@ def process_year_dir(
                     "algorithms_found": "",
                     "params_found": "",
                     "justification_found": 0,
-                    "justification_matches": "",
                     "evaluation_found": 0,
-                    "evaluation_matches": "",
                     "tuning_found": 0,
-                    "tuning_matches": "",
                     "missing_params": 1,
                     "missing_justification": 1,
                     "missing_evaluation": 1,

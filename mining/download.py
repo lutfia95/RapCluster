@@ -5,7 +5,6 @@ import sys
 import time
 import socket
 import logging
-import argparse
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -14,8 +13,8 @@ from tqdm import tqdm
 import xml.etree.ElementTree as ET
 
 
-Entrez.email = os.environ.get("NCBI_EMAIL", "xx.xxxx.xxxxx")
-Entrez.api_key = os.environ.get("NCBI_API_KEY")
+Entrez.email = "xx.xxxx.xxxxx"
+Entrez.api_key = "xxxx"
 
 YEARS = range(2025, 2026)
 
@@ -66,13 +65,6 @@ def build_query_for_year(year: int) -> str:
     )
 
 
-def build_query_for_pmid(pmid: str) -> str:
-    return f"{pmid}[pmid]"
-
-
-def normalize_pmcid(pmcid: str) -> str:
-    return pmcid.strip().removeprefix("PMC")
-
 
 def esearch_history(term: str, logger):
     """
@@ -85,37 +77,6 @@ def esearch_history(term: str, logger):
     qk = r["QueryKey"]
     logger.info(f"SEARCH count={count}")
     return count, webenv, qk
-
-
-def efetch_pmcid(pmcid: str, logger,
-                 max_retries=MAX_RETRIES, base_backoff=BASE_BACKOFF, timeout_sec=TIMEOUT_SEC):
-    """
-    Fetch one PMC article by PMCID/PMC UID.
-    """
-    socket.setdefaulttimeout(timeout_sec)
-    pmc_uid = normalize_pmcid(pmcid)
-
-    last_err = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            h = Entrez.efetch(
-                db="pmc",
-                id=pmc_uid,
-                rettype="full",
-                retmode="xml",
-            )
-            data = h.read()
-            return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else data
-        except Exception as e:
-            last_err = e
-            sleep_s = base_backoff * (2 ** (attempt - 1))
-            logger.warning(
-                f"RETRY {attempt}/{max_retries} pmcid=PMC{pmc_uid} "
-                f"err={type(e).__name__}: {e} sleep={sleep_s:.2f}s"
-            )
-            time.sleep(sleep_s)
-
-    raise last_err
 
 
 def efetch_batch(webenv: str, query_key: str, retstart: int, retmax: int, logger,
@@ -157,9 +118,9 @@ def _find_pmcid(article_elem):
     """
     Find PMC id inside an article, if present.
     """
-    # Typical NCBI variants include "pmc", "pmcid", and numeric "pmcaid".
+    # Typical: <article-id pub-id-type="pmc">1234567</article-id>
     for aid in article_elem.findall(".//article-id"):
-        if aid.attrib.get("pub-id-type") in {"pmc", "pmcid", "pmcaid"} and aid.text:
+        if aid.attrib.get("pub-id-type") == "pmc" and aid.text:
             return aid.text.strip()
     return None
 
@@ -252,44 +213,14 @@ def download_year(query: str, outdir: str, logger,
     return written_total
 
 
-def download_pmcid(pmcid: str, outdir: str, logger) -> int:
-    os.makedirs(outdir, exist_ok=True)
-    xml = efetch_pmcid(pmcid, logger)
-    written = split_and_write_articles(xml, outdir, logger, batch_retstart=0)
-    logger.info(f"SUMMARY {outdir}: pmcid=PMC{normalize_pmcid(pmcid)} written={written}")
-    return written
-
-
 
 def main():
-    ap = argparse.ArgumentParser(
-        description="Download open-access PMC full-text XML for year queries or one PMID/PMCID."
-    )
-    group = ap.add_mutually_exclusive_group()
-    group.add_argument("--pmid", help="Download the PMC full text associated with this PubMed PMID")
-    group.add_argument("--pmcid", help="Download one PMC full text by PMCID, e.g. PMC12222714")
-    ap.add_argument("--outdir", help="Output directory for --pmid/--pmcid mode")
-    args = ap.parse_args()
-
     logger, log_path = setup_logging()
     logger.info(f"Logging to: {log_path}")
     logger.info(
         f"CONFIG batch_size={BATCH_SIZE} workers={WORKERS} batch_throttle={BATCH_THROTTLE}s "
         f"max_retries={MAX_RETRIES} timeout={TIMEOUT_SEC}s"
     )
-
-    if args.pmcid:
-        outdir = args.outdir or f"pmc_articles_pmcid_{normalize_pmcid(args.pmcid)}"
-        download_pmcid(args.pmcid, outdir, logger)
-        logger.info("DONE")
-        return
-
-    if args.pmid:
-        outdir = args.outdir or f"pmc_articles_pmid_{args.pmid}"
-        q = build_query_for_pmid(args.pmid)
-        download_year(q, outdir, logger, batch_size=1, workers=1)
-        logger.info("DONE")
-        return
 
     for year in YEARS:
         logger.info(f"YEAR {year} start")
@@ -303,3 +234,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
