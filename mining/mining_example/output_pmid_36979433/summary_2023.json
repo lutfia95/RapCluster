@@ -1,0 +1,16 @@
+{
+  "total_articles": 1,
+  "articles_with_any_algorithm_match": 1,
+  "pct_with_any_algorithm_match": 100.0,
+  "articles_with_missing_reporting_signals": 0,
+  "pct_missing_reporting_signals_among_all": 0.0,
+  "missing_params": 0,
+  "missing_justification": 0,
+  "missing_evaluation": 0,
+  "missing_tuning": 0,
+  "parse_errors": 0,
+  "year": "2023",
+  "dir": "/Users/ahmadlutfi/Downloads/RapCluster/mining/mining_example/single_article_pmid_36979433/pmc_articles_2023_pmid_36979433",
+  "results_tsv": "/Users/ahmadlutfi/Downloads/RapCluster/mining/mining_example/output_pmid_36979433/results_2023.tsv",
+  "rows_written": 1
+}
