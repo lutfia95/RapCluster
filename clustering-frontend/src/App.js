@@ -770,6 +770,39 @@ function App() {
     }
   };
 
+  const getFormattedParamText = (definitions, customParams, useDefaults) => (
+    definitions
+      .map(param => {
+        const value = useDefaults ? param.default : (customParams[param.name] ?? param.default);
+        return `${param.name}=${value}`;
+      })
+      .join(', ')
+  );
+
+  const clusteringParamText = selectedAlgorithm
+    ? getFormattedParamText(algoParams[selectedAlgorithm] || [], customAlgorithmParams, useDefaultAlgorithmParams)
+    : '';
+
+  const reductionParamText = selectedReduction !== 'None'
+    ? getFormattedParamText(
+        reductionParamsDef[selectedReduction] || [],
+        customReductionParams,
+        useDefaultReductionParams
+      )
+    : '';
+
+  const methodsTemplateText = selectedAlgorithm
+    ? `The data were clustered using ${selectedAlgorithm}${
+        clusteringParamText ? ` with the following parameters: ${clusteringParamText}` : ''
+      }.${
+        selectedReduction === 'None'
+          ? ' No dimensionality reduction was applied before clustering.'
+          : ` Dimensionality reduction was performed using ${selectedReduction}${
+              reductionParamText ? ` with parameters ${reductionParamText}` : ''
+            }.`
+      }`
+    : '';
+
   return (
     <div className="App">
       <header className="App-header">
@@ -1209,6 +1242,11 @@ function App() {
               }}>
                 <h3 style={{ color: '#6a1b9a', marginBottom: '10px' }}>Method Details:</h3>
                 <pre style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>{methodDetails}</pre>
+                {methodsTemplateText && (
+                  <p style={{ marginTop: '12px', marginBottom: '12px', lineHeight: 1.6 }}>
+                    <strong>Methods Template:</strong> {methodsTemplateText}
+                  </p>
+                )}
                 <button onClick={downloadMethodDetails} style={{
                   marginTop: '10px',
                   padding: '8px 12px',
