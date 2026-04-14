@@ -135,7 +135,7 @@ function App() {
   useEffect(() => {
     const fetchAlgorithms = async () => {
       try {
-        // const response = await fetch('http://127.0.0.1:5000/api/algorithms');
+        //const response = await fetch('http://127.0.0.1:5000/api/algorithms');
         const response = await fetch('/rapcluster/api/algorithms');
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -175,7 +175,7 @@ function App() {
     }
 
     const headers = ["Name", "Cluster", "X", "Y", "Color"];
-    const tsvRows = clusterData.map(d => [
+    const tsvRows = sortedClusterData.map(d => [
       d.name,
       d.cluster === -1 ? 'Noise (-1)' : d.cluster, 
       d.x.toFixed(6), 
@@ -408,7 +408,7 @@ function App() {
     console.log("Sending clustering params:", finalAlgorithmParams);
 
     try {
-      // const response = await fetch('http://127.0.0.1:5000/api/cluster', {
+      //const response = await fetch('http://127.0.0.1:5000/api/cluster', {
       const response = await fetch('/rapcluster/api/cluster', {
         method: 'POST',
         body: formData,
@@ -730,6 +730,15 @@ function App() {
     hoverinfo: 'text'
   }] : [];
 
+  const sortedClusterData = clusterData
+    ? [...clusterData].sort((a, b) => {
+        if (a.cluster !== b.cluster) {
+          return a.cluster - b.cluster;
+        }
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      })
+    : [];
+
   const plotLayout = {
     title: `Clustering Results (${selectedAlgorithm} with ${selectedReduction})`,
     xaxis: { title: 'Dimension 1' },
@@ -792,15 +801,15 @@ function App() {
     : '';
 
   const methodsTemplateText = selectedAlgorithm
-    ? `The data were clustered using ${selectedAlgorithm}${
-        clusteringParamText ? ` with the following parameters: ${clusteringParamText}` : ''
-      }.${
-        selectedReduction === 'None'
-          ? ' No dimensionality reduction was applied before clustering.'
-          : ` Dimensionality reduction was performed using ${selectedReduction}${
-              reductionParamText ? ` with parameters ${reductionParamText}` : ''
-            }.`
-      }`
+    ? selectedReduction === 'None'
+      ? `Clustering was applied without dimensionality reduction using ${selectedAlgorithm}${
+          clusteringParamText ? ` with the following parameters: ${clusteringParamText}` : ''
+        }.`
+      : `The data were first reduced in dimensionality using ${selectedReduction}${
+          reductionParamText ? ` with the following parameters: ${reductionParamText}` : ''
+        }, and then clustered using ${selectedAlgorithm}${
+          clusteringParamText ? ` with the following parameters: ${clusteringParamText}` : ''
+        }.`
     : '';
 
   return (
@@ -1280,7 +1289,7 @@ function App() {
                         </tr>
                     </thead>
                     <tbody>
-                        {clusterData.map((d, index) => (
+                        {sortedClusterData.map((d, index) => (
                             <tr key={index}>
                                 <td>{d.name}</td>
                                 <td>{d.cluster === -1 ? 'Noise (-1)' : d.cluster}</td>
