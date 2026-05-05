@@ -503,7 +503,7 @@ function App() {
       const normalizedDistance = edge.distance / maxNetworkDistance;
       const opacity = Math.max(0.2, 1 - normalizedDistance * 0.8);
       const colorValue = Math.floor(255 * normalizedDistance);
-      const edgeColor = `rgb(${colorValue}, ${colorValue}, ${colorValue}, ${opacity})`; // Greyscale variant, or pick another color
+      const edgeColor = `rgba(${colorValue}, ${colorValue}, ${colorValue}, ${opacity})`; // Greyscale variant, or pick another color
 
       return {
         type: 'scatter',

@@ -12,8 +12,8 @@ from sklearn import cluster, mixture
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from hdbscan import HDBSCAN
-import matplotlib.cm as cm 
 import matplotlib.colors as mcolors 
+from matplotlib import colormaps
 from flask import Flask, request, jsonify
 from flask_cors import CORS 
 
@@ -156,10 +156,12 @@ def load_data(file_path, file_content, file_type, name_column, intensity_start_i
         df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
     
     intensity_cols = df.columns[intensity_start_index:]
-    data = df[intensity_cols].apply(pd.to_numeric, errors='coerce').to_numpy(dtype=float)
+    raw_data = df[intensity_cols].apply(pd.to_numeric, errors='coerce').to_numpy(dtype=float)
 
-    data[np.isnan(data)] = 0.0
-    data = np.log2(data + 1.0)
+    raw_data[np.isnan(raw_data)] = 0.0
+    # Preserve negative values for visualization while keeping the transform finite.
+    data_log10_transformed = np.sign(raw_data) * np.log10(np.abs(raw_data) + 1.0)
+    data = np.log2(raw_data + 1.0)
 
     nonzero_mask = ~(np.all(data == 0.0, axis=1))
     data = data[nonzero_mask]
@@ -172,8 +174,6 @@ def load_data(file_path, file_content, file_type, name_column, intensity_start_i
 
     scaler = StandardScaler()
     data_scaled = scaler.fit_transform(data.T).T 
-    data_log10_transformed = np.log10(data + 1)
-
     return data_scaled, names, data_log10_transformed
 
 
@@ -387,7 +387,7 @@ def cluster_data():
 
         unique_labels = sorted(set(labels))
 
-        cmap = cm.get_cmap("tab20")
+        cmap = colormaps.get_cmap("tab20")
         colors_map = {}
         color_idx = 0
         for label in unique_labels:
