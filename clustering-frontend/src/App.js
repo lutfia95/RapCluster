@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Modal from 'react-modal';
 // import Plot from 'react-plotly.js-basic-dist';
 import Plot from 'react-plotly.js';
@@ -112,6 +112,11 @@ function App() {
   const [clusterData, setClusterData] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [clusterColors, setClusterColors] = useState({});
+  const [intensityColumns, setIntensityColumns] = useState([]);
+  const [heatmapCluster, setHeatmapCluster] = useState('summary');
+  const [heatmapAggregation, setHeatmapAggregation] = useState('median');
+  const [heatmapRowLimit, setHeatmapRowLimit] = useState(250);
+  const [showHeatmapDendrogram, setShowHeatmapDendrogram] = useState(true);
 
   const [availableAlgos, setAvailableAlgos] = useState([]);
   const [availableReductions, setAvailableReductions] = useState([]);
@@ -135,8 +140,8 @@ function App() {
   useEffect(() => {
     const fetchAlgorithms = async () => {
       try {
-        //const response = await fetch('http://127.0.0.1:5000/api/algorithms');
-        const response = await fetch('/rapcluster/api/algorithms');
+        const response = await fetch('http://127.0.0.1:5000/api/algorithms');
+        //const response = await fetch('/rapcluster/api/algorithms');
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -313,6 +318,8 @@ function App() {
     setClusterData(null);
     setMetrics(null);
     setClusterColors({});
+    setIntensityColumns([]);
+    setHeatmapCluster('summary');
 
     let details = `Clustering Algorithm: ${selectedAlgorithm}\n`;
     details += `  → ${methodDescriptions.clustering[selectedAlgorithm] || 'No description.'}\n`;
@@ -408,8 +415,8 @@ function App() {
     console.log("Sending clustering params:", finalAlgorithmParams);
 
     try {
-      //const response = await fetch('http://127.0.0.1:5000/api/cluster', {
-      const response = await fetch('/rapcluster/api/cluster', {
+      const response = await fetch('http://127.0.0.1:5000/api/cluster', {
+      //const response = await fetch('/rapcluster/api/cluster', {
         method: 'POST',
         body: formData,
       });
@@ -423,6 +430,7 @@ function App() {
       setClusterData(data.cluster_data);
       setMetrics(data.metrics);
       setClusterColors(data.cluster_colors);
+      setIntensityColumns(data.intensity_columns || []);
       const algoParamsUsed = (algoParams[selectedAlgorithm] || []).map(p => {
         const val = useDefaultAlgorithmParams
           ? p.default
@@ -752,6 +760,284 @@ function App() {
     shapes: [],
   };
 
+  const getProfileValues = useCallback((node) => {
+    if (Array.isArray(node.profile_values) && node.profile_values.length > 0) {
+      return node.profile_values;
+    }
+    return Array.isArray(node.intensities) ? node.intensities : [];
+  }, []);
+
+  const heatmapColumnLabels = useMemo(() => {
+    const firstProfile = clusterData?.find(d => getProfileValues(d).length > 0);
+    const profileLength = firstProfile ? getProfileValues(firstProfile).length : 0;
+    if (intensityColumns.length === profileLength) {
+      return intensityColumns;
+    }
+    return Array.from({ length: profileLength }, (_, i) => `Dimension ${i + 1}`);
+  }, [clusterData, intensityColumns, getProfileValues]);
+
+  const heatmapClusters = useMemo(() => {
+    if (!clusterData) return [];
+    return Array.from(new Set(clusterData.map(d => d.cluster))).sort((a, b) => a - b);
+  }, [clusterData]);
+
+  const aggregateProfileValue = useCallback((rows, columnIndex) => {
+    const values = rows
+      .map(row => getProfileValues(row)[columnIndex])
+      .filter(value => Number.isFinite(value));
+
+    if (values.length === 0) return null;
+
+    if (heatmapAggregation === 'mean') {
+      return values.reduce((sum, value) => sum + value, 0) / values.length;
+    }
+
+    const sortedValues = [...values].sort((a, b) => a - b);
+    const midpoint = Math.floor(sortedValues.length / 2);
+    if (sortedValues.length % 2 === 0) {
+      return (sortedValues[midpoint - 1] + sortedValues[midpoint]) / 2;
+    }
+    return sortedValues[midpoint];
+  }, [heatmapAggregation, getProfileValues]);
+
+  const profileDistance = useCallback((a, b) => {
+    let sumSquares = 0;
+    let count = 0;
+
+    for (let i = 0; i < Math.min(a.length, b.length); i += 1) {
+      if (Number.isFinite(a[i]) && Number.isFinite(b[i])) {
+        sumSquares += (a[i] - b[i]) ** 2;
+        count += 1;
+      }
+    }
+
+    return count === 0 ? Number.POSITIVE_INFINITY : Math.sqrt(sumSquares);
+  }, []);
+
+  const buildDendrogram = useCallback((rows) => {
+    if (rows.length < 2) {
+      return null;
+    }
+
+    const pairwiseDistances = new Map();
+    const getPairKey = (a, b) => `${Math.min(a, b)}-${Math.max(a, b)}`;
+
+    for (let i = 0; i < rows.length; i += 1) {
+      for (let j = i + 1; j < rows.length; j += 1) {
+        pairwiseDistances.set(getPairKey(i, j), profileDistance(rows[i].values, rows[j].values));
+      }
+    }
+
+    const clusterDistance = (a, b) => {
+      let total = 0;
+      let count = 0;
+
+      a.members.forEach(i => {
+        b.members.forEach(j => {
+          const distance = pairwiseDistances.get(getPairKey(i, j));
+          if (Number.isFinite(distance)) {
+            total += distance;
+            count += 1;
+          }
+        });
+      });
+
+      return count === 0 ? Number.POSITIVE_INFINITY : total / count;
+    };
+
+    let nextId = rows.length;
+    let clusters = rows.map((row, index) => ({
+      id: index,
+      members: [index],
+      row,
+      left: null,
+      right: null,
+      distance: 0
+    }));
+
+    while (clusters.length > 1) {
+      let bestI = 0;
+      let bestJ = 1;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      for (let i = 0; i < clusters.length; i += 1) {
+        for (let j = i + 1; j < clusters.length; j += 1) {
+          const distance = clusterDistance(clusters[i], clusters[j]);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestI = i;
+            bestJ = j;
+          }
+        }
+      }
+
+      if (!Number.isFinite(bestDistance)) {
+        break;
+      }
+
+      const left = clusters[bestI];
+      const right = clusters[bestJ];
+      const merged = {
+        id: nextId,
+        members: [...left.members, ...right.members],
+        row: null,
+        left,
+        right,
+        distance: bestDistance
+      };
+      nextId += 1;
+
+      clusters = clusters.filter((_, index) => index !== bestI && index !== bestJ);
+      clusters.push(merged);
+    }
+
+    const root = clusters[0];
+    const leafOrder = [];
+    const collectLeaves = (node) => {
+      if (!node.left && !node.right) {
+        leafOrder.push(node.id);
+        return;
+      }
+      collectLeaves(node.left);
+      collectLeaves(node.right);
+    };
+    collectLeaves(root);
+
+    const yByLeaf = new Map(leafOrder.map((leafId, index) => [leafId, index]));
+    const getNodeY = (node) => {
+      if (!node.left && !node.right) {
+        return yByLeaf.get(node.id);
+      }
+      return (getNodeY(node.left) + getNodeY(node.right)) / 2;
+    };
+
+    const traces = [];
+    const addTraces = (node) => {
+      if (!node.left || !node.right) return;
+
+      const leftY = getNodeY(node.left);
+      const rightY = getNodeY(node.right);
+
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        x: [node.left.distance, node.distance, node.distance, node.right.distance],
+        y: [leftY, leftY, rightY, rightY],
+        line: { color: '#444', width: 1.2 },
+        hoverinfo: 'skip',
+        showlegend: false
+      });
+
+      addTraces(node.left);
+      addTraces(node.right);
+    };
+    addTraces(root);
+
+    return {
+      orderedRows: leafOrder.map(index => rows[index]),
+      traces,
+      maxDistance: root.distance || 1
+    };
+  }, [profileDistance]);
+
+  const heatmapSummaryRows = useMemo(() => {
+    if (!clusterData || heatmapColumnLabels.length === 0) return [];
+
+    return heatmapClusters.map(clusterId => {
+      const rows = clusterData.filter(row => row.cluster === clusterId);
+      return {
+        clusterId,
+        label: clusterId === -1 ? `Noise (-1), n=${rows.length}` : `Cluster ${clusterId}, n=${rows.length}`,
+        color: clusterColors[clusterId] || '#808080',
+        values: heatmapColumnLabels.map((_, columnIndex) => aggregateProfileValue(rows, columnIndex))
+      };
+    });
+  }, [clusterData, clusterColors, heatmapClusters, heatmapColumnLabels, aggregateProfileValue]);
+
+  const selectedHeatmapRows = useMemo(() => {
+    if (!clusterData || heatmapCluster === 'summary') return [];
+
+    return clusterData
+      .filter(row => row.cluster === Number(heatmapCluster))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }, [clusterData, heatmapCluster]);
+
+  const visibleHeatmapRows = selectedHeatmapRows.slice(0, heatmapRowLimit);
+  const dendrogramRowLimit = 250;
+  const heatmapValueLabel = heatmapCluster === 'summary'
+    ? `${heatmapAggregation === 'mean' ? 'Mean' : 'Median'} row-scaled log2-transformed intensity`
+    : 'Row-scaled log2-transformed intensity';
+  const heatmapRows = useMemo(() => (
+    heatmapCluster === 'summary'
+      ? heatmapSummaryRows
+      : visibleHeatmapRows.map(row => ({
+          label: row.name,
+          values: getProfileValues(row)
+        }))
+  ), [heatmapCluster, heatmapSummaryRows, visibleHeatmapRows, getProfileValues]);
+  const heatmapDendrogram = useMemo(() => {
+    if (!showHeatmapDendrogram || heatmapRows.length > dendrogramRowLimit) {
+      return null;
+    }
+    return buildDendrogram(heatmapRows);
+  }, [showHeatmapDendrogram, heatmapRows, buildDendrogram]);
+  const orderedHeatmapRows = heatmapDendrogram?.orderedRows || heatmapRows;
+  const heatmapData = [{
+    type: 'heatmap',
+    z: orderedHeatmapRows.map(row => row.values),
+    x: heatmapColumnLabels,
+    y: orderedHeatmapRows.map(row => row.label),
+    colorscale: 'RdBu',
+    reversescale: true,
+    zmid: 0,
+        colorbar: { title: heatmapValueLabel },
+    hovertemplate: `%{y}<br>%{x}: %{z:.3f}<br>${heatmapValueLabel}<extra></extra>`
+  }];
+
+  const heatmapLayout = {
+    title: heatmapCluster === 'summary'
+      ? `Cluster ${heatmapAggregation === 'mean' ? 'Mean' : 'Median'} Profiles`
+      : `Cluster ${heatmapCluster} Profiles`,
+    height: heatmapCluster === 'summary'
+      ? Math.max(450, heatmapSummaryRows.length * 34 + 180)
+      : Math.min(1200, Math.max(520, visibleHeatmapRows.length * 12 + 180)),
+    width: 1000,
+    margin: { l: heatmapCluster === 'summary' ? 170 : 220, r: 40, t: 70, b: 120 },
+    xaxis: {
+      title: 'Intensity columns',
+      automargin: true,
+      tickangle: heatmapColumnLabels.length > 12 ? -45 : 0
+    },
+    yaxis: {
+      title: heatmapCluster === 'summary' ? 'Clusters' : nameColumn,
+      automargin: true,
+      autorange: 'reversed',
+      showticklabels: heatmapCluster === 'summary' || visibleHeatmapRows.length <= 120
+    },
+    plot_bgcolor: '#fcfcfc',
+    paper_bgcolor: '#fcfcfc'
+  };
+  const dendrogramLayout = {
+    title: 'Hierarchical ordering',
+    height: heatmapLayout.height,
+    width: 220,
+    margin: { l: 10, r: 10, t: 70, b: 120 },
+    xaxis: {
+      title: 'Distance',
+      showgrid: false,
+      zeroline: false,
+      range: [Math.max(heatmapDendrogram?.maxDistance || 1, 1e-6), 0]
+    },
+    yaxis: {
+      visible: false,
+      autorange: 'reversed',
+      range: [-0.5, Math.max(orderedHeatmapRows.length - 0.5, 0.5)]
+    },
+    plot_bgcolor: '#fcfcfc',
+    paper_bgcolor: '#fcfcfc',
+    showlegend: false
+  };
+
   const downloadMethodDetails = () => {
     if (!methodDetails.trim()) {
       alert("No method details available to download.");
@@ -1054,6 +1340,12 @@ function App() {
                   Clusters Network
                 </button>
                 <button
+                  onClick={() => setActiveTab("heatmap")}
+                  className={activeTab === "heatmap" ? "active" : ""}
+                >
+                  Heatmap
+                </button>
+                <button
                   onClick={() => setActiveTab("subnetwork")}
                   className={activeTab === "subnetwork" ? "active" : ""}
                   disabled={!subnetworkData.length}
@@ -1136,6 +1428,138 @@ function App() {
                   </div>
                 </>
               )}
+
+              {activeTab === "heatmap" && (
+                <>
+                  <div className="heatmap-explanation">
+                    <strong>Values:</strong> row-scaled log2-transformed intensities.
+                    <span> The dendrogram is hierarchical ordering for the heatmap profiles, not a separate clustering algorithm.</span>
+                  </div>
+
+                  <div className="heatmap-controls">
+                    <label>
+                      View
+                      <select
+                        value={heatmapCluster}
+                        onChange={(e) => setHeatmapCluster(e.target.value)}
+                      >
+                        <option value="summary">Cluster summary</option>
+                        {heatmapClusters.map(clusterId => {
+                          const count = clusterData.filter(row => row.cluster === clusterId).length;
+                          const label = clusterId === -1 ? `Noise (-1), n=${count}` : `Cluster ${clusterId}, n=${count}`;
+                          return (
+                            <option key={clusterId} value={String(clusterId)}>
+                              {label}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+
+                    {heatmapCluster === 'summary' && (
+                      <label>
+                        Summary
+                        <select
+                          value={heatmapAggregation}
+                          onChange={(e) => setHeatmapAggregation(e.target.value)}
+                        >
+                          <option value="median">Median</option>
+                          <option value="mean">Mean</option>
+                        </select>
+                      </label>
+                    )}
+
+                    {heatmapCluster !== 'summary' && (
+                      <label>
+                        Rows
+                        <select
+                          value={heatmapRowLimit}
+                          onChange={(e) => setHeatmapRowLimit(parseInt(e.target.value))}
+                        >
+                          {[100, 250, 500, 1000].map(limit => (
+                            <option key={limit} value={limit}>{limit}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    <label className="heatmap-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={showHeatmapDendrogram}
+                        onChange={(e) => setShowHeatmapDendrogram(e.target.checked)}
+                      />
+                      Show hierarchical dendrogram
+                    </label>
+                  </div>
+
+                  {heatmapData[0]?.z?.length > 0 ? (
+                    <div className="heatmap-plot-row">
+                      {showHeatmapDendrogram && (
+                        <div className="dendrogram-panel">
+                          <div className="dendrogram-title">Hierarchical dendrogram</div>
+                          {heatmapDendrogram ? (
+                            <Plot
+                              data={heatmapDendrogram.traces}
+                              layout={dendrogramLayout}
+                              config={{
+                                responsive: true,
+                                displayModeBar: false,
+                              }}
+                            />
+                          ) : (
+                            <div className="dendrogram-placeholder">
+                              {heatmapRows.length < 2
+                                ? 'At least two rows are needed.'
+                                : `Reduce rows to ${dendrogramRowLimit} or fewer.`}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <Plot
+                        data={heatmapData}
+                        layout={heatmapLayout}
+                        config={{
+                          responsive: true,
+                          displayModeBar: true,
+                          toImageButtonOptions: {
+                            format: "svg",
+                            filename: heatmapCluster === 'summary' ? "cluster_summary_heatmap" : `cluster_${heatmapCluster}_heatmap`,
+                            scale: 1,
+                          },
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <p>No heatmap values are available for this result.</p>
+                  )}
+
+                  {heatmapCluster !== 'summary' && selectedHeatmapRows.length > visibleHeatmapRows.length && (
+                    <p className="heatmap-note">
+                      Showing {visibleHeatmapRows.length} of {selectedHeatmapRows.length} rows in this cluster.
+                    </p>
+                  )}
+
+                  {showHeatmapDendrogram && heatmapRows.length > dendrogramRowLimit && (
+                    <p className="heatmap-note">
+                      Dendrogram hidden for this view because it has {heatmapRows.length} rows. Reduce the row limit to {dendrogramRowLimit} or fewer to show it.
+                    </p>
+                  )}
+
+                  <div className="plot-caption">
+                    <h4>Caption Template:</h4>
+                    <p>
+                      Heatmap of <strong>row-scaled log2-transformed intensity profiles</strong> after clustering with{" "}
+                      <strong>{selectedAlgorithm}</strong>. Rows are{" "}
+                      {heatmapCluster === 'summary'
+                        ? `${heatmapAggregation} cluster profiles`
+                        : `${nameColumn} entries from Cluster ${heatmapCluster}`}
+                      ; columns are the uploaded intensity columns. The dendrogram, when shown, is hierarchical ordering of these heatmap profiles and is not a separate RapCluster clustering result.
+                    </p>
+                  </div>
+                </>
+              )}
+
               {activeTab === "subnetwork" && (
                 <section>
                     <h2>Sub-network View</h2>
