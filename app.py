@@ -165,6 +165,7 @@ def load_data(file_path, file_content, file_type, name_column, intensity_start_i
 
     nonzero_mask = ~(np.all(data == 0.0, axis=1))
     data = data[nonzero_mask]
+    data_log10_transformed = data_log10_transformed[nonzero_mask]
 
     if name_column in df.columns:
         names = df.loc[nonzero_mask, name_column].astype(str).tolist()
@@ -174,7 +175,7 @@ def load_data(file_path, file_content, file_type, name_column, intensity_start_i
 
     scaler = StandardScaler()
     data_scaled = scaler.fit_transform(data.T).T 
-    return data_scaled, names, data_log10_transformed
+    return data_scaled, names, data_log10_transformed, intensity_cols.astype(str).tolist()
 
 
 def apply_dimensionality_reduction(X, method, params):
@@ -365,7 +366,7 @@ def cluster_data():
 
     try:
 
-        original_data, names, data_log10_transformed = load_data(file.filename, file.stream, file_type, name_column, intensity_start_index)
+        original_data, names, data_log10_transformed, intensity_columns = load_data(file.filename, file.stream, file_type, name_column, intensity_start_index)
         
         X_processed = apply_dimensionality_reduction(original_data, reduction_method, reduction_params)
         
@@ -406,7 +407,8 @@ def cluster_data():
                 "y": float(X_processed[i, 1]),
                 "cluster": int(labels[i]),
                 "color": colors_map.get(int(labels[i]), "#000000"),
-                "intensities": data_log10_transformed[i].tolist()
+                "intensities": data_log10_transformed[i].tolist(),
+                "profile_values": original_data[i].tolist()
             })
 
         response_data = {
@@ -419,7 +421,8 @@ def cluster_data():
                 "runtime_seconds": float(runtime)
             },
             "cluster_data": cluster_results,
-            "cluster_colors": colors_map
+            "cluster_colors": colors_map,
+            "intensity_columns": intensity_columns
         }
         return jsonify(response_data), 200
 

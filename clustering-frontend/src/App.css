@@ -308,6 +308,80 @@ h2 {
   gap: 12px;
   margin-bottom: 18px;
   justify-content: center;
+  flex-wrap: wrap;
+}
+
+.heatmap-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  align-items: end;
+  margin-bottom: 16px;
+}
+
+.heatmap-explanation {
+  max-width: 900px;
+  margin: 0 auto 14px;
+  padding: 10px 12px;
+  border: 1px solid #cce5ff;
+  border-radius: 5px;
+  background-color: #f0f8ff;
+  color: #333;
+  line-height: 1.45;
+}
+
+.heatmap-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 150px;
+  text-align: left;
+  font-weight: bold;
+  color: #555;
+}
+
+.heatmap-controls select {
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background-color: #fff;
+}
+
+.heatmap-controls .heatmap-checkbox {
+  flex-direction: row;
+  align-items: center;
+  min-width: auto;
+  padding-bottom: 8px;
+}
+
+.heatmap-plot-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 12px;
+  overflow-x: auto;
+}
+
+.dendrogram-placeholder {
+  width: 220px;
+  min-height: 120px;
+  border: 1px dashed #bbb;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  color: #666;
+  font-size: 0.9em;
+  background-color: #fafafa;
+}
+
+.heatmap-note {
+  margin: 8px 0 0;
+  color: #666;
+  font-size: 0.95em;
 }
 
 .subnetwork {
