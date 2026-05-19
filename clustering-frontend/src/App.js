@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Modal from 'react-modal';
 // import Plot from 'react-plotly.js-basic-dist';
 import Plot from 'react-plotly.js';
-import { readString } from 'react-papaparse';
 import * as XLSX from 'xlsx';
 import './App.css';
 import AlgorithmGuideDR from './AlgorithmGuideDR';
@@ -105,6 +104,7 @@ function App() {
   const [activeTab, setActiveTab] = useState("scatter");
   const [fileName, setFileName] = useState('');
   const [fileType, setFileType] = useState('');
+  const [columnNames, setColumnNames] = useState([]);
   const [nameColumn, setNameColumn] = useState('Name');
   const [intensityStartIndex, setIntensityStartIndex] = useState(1); 
   const [loading, setLoading] = useState(false);
@@ -136,6 +136,51 @@ function App() {
   const [selectedProfileNames, setSelectedProfileNames] = useState([]);
 
   const fileInputRef = useRef(null); 
+
+  const parseDelimitedHeaderLine = (line, delimiter) => {
+    const columns = [];
+    let currentValue = '';
+    let inQuotes = false;
+
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+
+      if (character === '"') {
+        if (inQuotes && line[index + 1] === '"') {
+          currentValue += '"';
+          index += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (character === delimiter && !inQuotes) {
+        columns.push(currentValue.trim());
+        currentValue = '';
+      } else {
+        currentValue += character;
+      }
+    }
+
+    columns.push(currentValue.trim());
+
+    return columns
+      .map(column => column.replace(/^"(.*)"$/, '$1').trim())
+      .filter(Boolean);
+  };
+
+  const getDelimitedColumnNames = async (selectedFile, ext) => {
+    const fileText = await selectedFile.text();
+    const firstContentLine = fileText
+      .split(/\r?\n/)
+      .find(line => line.trim().length > 0)
+      ?.replace(/^\uFEFF/, '');
+
+    if (!firstContentLine) {
+      return [];
+    }
+
+    const delimiter = ext === 'tsv' ? '\t' : ',';
+    return parseDelimitedHeaderLine(firstContentLine, delimiter);
+  };
 
   useEffect(() => {
     const fetchAlgorithms = async () => {
@@ -208,24 +253,46 @@ function App() {
       console.error("Browser does not support download attribute.");
     }
   };
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
       setFile(selectedFile);
       setFileName(selectedFile.name);
       const ext = selectedFile.name.split('.').pop().toLowerCase();
       if (['csv', 'tsv', 'xlsx', 'xls'].includes(ext)) {
-        setFileType(ext === 'xls' ? 'xlsx' : ext); 
+        const normalizedType = ext === 'xls' ? 'xlsx' : ext;
+        setFileType(normalizedType);
+        setError(null);
+
+        if (normalizedType === 'csv' || normalizedType === 'tsv') {
+          try {
+            const headers = await getDelimitedColumnNames(selectedFile, normalizedType);
+            setColumnNames(headers);
+            setNameColumn(previousNameColumn => {
+              if (headers.includes(previousNameColumn)) {
+                return previousNameColumn;
+              }
+              return headers[0] || previousNameColumn || 'Name';
+            });
+          } catch (readError) {
+            console.error('Failed to read column names from file:', readError);
+            setColumnNames([]);
+          }
+        } else {
+          setColumnNames([]);
+        }
       } else {
         setError('Unsupported file type. Please select a TSV file.');
         setFile(null);
         setFileName('');
         setFileType('');
+        setColumnNames([]);
       }
     } else {
       setFile(null);
       setFileName('');
       setFileType('');
+      setColumnNames([]);
     }
   };
 
@@ -1081,6 +1148,8 @@ function App() {
     setFile(null);
     setFileName('');
     setFileType('');
+    setColumnNames([]);
+    setNameColumn('Name');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -1172,14 +1241,27 @@ function App() {
 
             <div className="form-group">
               <label htmlFor="name-column">Name of Node Column:</label>
-              <input
-                type="text"
-                id="name-column"
-                value={nameColumn}
-                onChange={(e) => setNameColumn(e.target.value)}
-                placeholder="e.g., GeneName"
-                required
-              />
+              {['csv', 'tsv'].includes(fileType) && columnNames.length > 0 ? (
+                <select
+                  id="name-column"
+                  value={columnNames.includes(nameColumn) ? nameColumn : columnNames[0]}
+                  onChange={(e) => setNameColumn(e.target.value)}
+                  required
+                >
+                  {columnNames.map(columnName => (
+                    <option key={columnName} value={columnName}>{columnName}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  id="name-column"
+                  value={nameColumn}
+                  onChange={(e) => setNameColumn(e.target.value)}
+                  placeholder="e.g., GeneName"
+                  required
+                />
+              )}
             </div>
 
             <div className="form-group">
