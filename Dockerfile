@@ -27,8 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt \
- && pip install xlrd>=2.0.1
+ && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 COPY --from=frontend-build /app/build /usr/share/nginx/html
