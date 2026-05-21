@@ -244,7 +244,7 @@ function App() {
   useEffect(() => {
     const fetchAlgorithms = async () => {
       try {
-        // const response = await fetch('http://127.0.0.1:5000/api/algorithms');
+        //const response = await fetch('http://127.0.0.1:5000/api/algorithms');
         const response = await fetch('/rapcluster/api/algorithms');
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -1150,9 +1150,30 @@ function App() {
   const orderedHeatmapRows = heatmapDendrogram?.orderedRows || heatmapRows;
   const hasVisibleDendrogram = Boolean(heatmapDendrogram);
   const heatmapRowPixelHeight = heatmapCluster === 'summary' ? 38 : 18;
+  const heatmapVisibleRowCount = heatmapCluster === 'summary'
+    ? heatmapSummaryRows.length
+    : visibleHeatmapRows.length;
+  const heatmapLabelFontSize = heatmapCluster === 'summary'
+    ? 12
+    : heatmapVisibleRowCount > 500
+      ? 7
+      : heatmapVisibleRowCount > 250
+        ? 8
+        : heatmapVisibleRowCount > 120
+          ? 9
+          : 10;
+  const longestHeatmapLabelLength = orderedHeatmapRows.reduce(
+    (maxLength, row) => Math.max(maxLength, String(row.label || '').length),
+    0
+  );
+  const heatmapLeftMargin = hasVisibleDendrogram
+    ? 40
+    : heatmapCluster === 'summary'
+      ? 170
+      : Math.min(360, Math.max(220, longestHeatmapLabelLength * heatmapLabelFontSize * 0.58 + 34));
   const heatmapHeight = heatmapCluster === 'summary'
     ? Math.max(380, heatmapSummaryRows.length * heatmapRowPixelHeight + 170)
-    : Math.min(4200, Math.max(520, visibleHeatmapRows.length * heatmapRowPixelHeight + 190));
+    : Math.max(520, visibleHeatmapRows.length * heatmapRowPixelHeight + 190);
   const heatmapRowPositions = orderedHeatmapRows.map((_, index) => index);
   const heatmapTrace = {
     type: 'heatmap',
@@ -1186,7 +1207,7 @@ function App() {
     height: heatmapHeight,
     width: 1100,
     margin: {
-      l: hasVisibleDendrogram ? 40 : (heatmapCluster === 'summary' ? 170 : 220),
+      l: heatmapLeftMargin,
       r: 40,
       t: 70,
       b: 120
@@ -1218,7 +1239,9 @@ function App() {
       ticktext: orderedHeatmapRows.map(row => row.label),
       range: [Math.max(orderedHeatmapRows.length - 0.5, 0.5), -0.5],
       automargin: true,
-      showticklabels: heatmapCluster === 'summary' || visibleHeatmapRows.length <= 120
+      tickfont: { size: heatmapLabelFontSize },
+      ticklabeloverflow: 'allow',
+      showticklabels: true
     },
     plot_bgcolor: '#fcfcfc',
     paper_bgcolor: '#fcfcfc',
