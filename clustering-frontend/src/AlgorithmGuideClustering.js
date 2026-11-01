@@ -109,6 +109,34 @@ const AlgorithmGuideClustering = () => {
         <li><strong>init_params</strong>: Method to initialize (e.g., "kmeans").</li>
       </ul>
       <p><strong>Recommended to tune:</strong> <code>n_components</code>, <code>covariance_type</code></p>
+
+      <h3>BayesianGaussianMixture</h3>
+      <p>
+        Gaussian mixture fitted with variational inference. <code>n_components</code> is only an upper bound: the
+        weight prior pushes unneeded components towards zero weight, so the effective number of clusters is inferred
+        from the data. Every row gets a membership probability (shown in Cluster Details and the labels file).
+      </p>
+      <ul>
+        <li><strong>n_components</strong>: Maximum number of components (choose generously).</li>
+        <li><strong>weight_concentration_prior_type</strong>: "dirichlet_process" (tends to fewer components) or "dirichlet_distribution".</li>
+        <li><strong>weight_concentration_prior</strong>: Smaller values leave more components empty; None uses 1 / n_components.</li>
+        <li><strong>covariance_type</strong>: Shape of the components ("full", "tied", "diag", "spherical").</li>
+        <li><strong>max_iter</strong>: Iteration limit; raise it when a convergence warning appears.</li>
+      </ul>
+      <p><strong>Recommended to tune:</strong> <code>weight_concentration_prior</code>, <code>covariance_type</code></p>
+
+      <h3>BisectingKMeans</h3>
+      <p>
+        Divisive hierarchical variant of K-Means: starts with one cluster and repeatedly splits a cluster in two until
+        <code>n_clusters</code> is reached. Faster than AgglomerativeClustering on large data and less sensitive to the
+        initialization than plain K-Means; clusters are still assumed to be compact and convex.
+      </p>
+      <ul>
+        <li><strong>n_clusters</strong>: Number of clusters.</li>
+        <li><strong>bisecting_strategy</strong>: Split the cluster with the "biggest_inertia" (spread) or the "largest_cluster".</li>
+        <li><strong>init</strong>: Initialization of each 2-means split.</li>
+      </ul>
+      <p><strong>Recommended to tune:</strong> <code>n_clusters</code>, <code>bisecting_strategy</code></p>
     </div>
   );
 };

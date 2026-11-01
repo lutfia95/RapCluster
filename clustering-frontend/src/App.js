@@ -7,6 +7,27 @@ import * as XLSX from 'xlsx';
 import './App.css';
 import AlgorithmGuideDR from './AlgorithmGuideDR';
 import AlgorithmGuideClustering from './AlgorithmGuideClustering';
+import RunHistory from './RunHistory';
+import RunComparison from './RunComparison';
+import Leaderboard from './Leaderboard';
+import PreflightReport from './PreflightReport';
+import { ApiError, fetchJson, formatApiError, pollJob } from './api';
+import PreprocessingOptions, { DEFAULT_PREPROCESSING } from './PreprocessingOptions';
+import ExploratoryAnalysis from './ExploratoryAnalysis';
+import ClusterCharacterization from './ClusterCharacterization';
+import StabilityAnalysis from './StabilityAnalysis';
+import ParameterSweep from './ParameterSweep';
+import HelpTip from './HelpTip';
+import { ALGORITHM_HELP, HELP, REDUCTION_HELP, paramHelp } from './helpTexts';
+
+// Same-origin in both modes: nginx proxies this path in Docker, src/setupProxy.js in the dev server.
+const API_BASE = process.env.REACT_APP_API_BASE || '/rapcluster/api';
+
+const createSessionId = () => (
+  window.crypto?.randomUUID
+    ? window.crypto.randomUUID().replace(/-/g, '')
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`
+);
 
 
 const methodDescriptions = {
@@ -21,55 +42,15 @@ const methodDescriptions = {
     HDBSCAN: "Improved DBSCAN for varying density with hierarchical clustering.",
     OPTICS: "Orders data to identify clusters at varying density thresholds.",
     BIRCH: "Scalable clustering using compact feature trees.",
-    GaussianMixture: "Probabilistic clustering assuming Gaussian-distributed data."
+    GaussianMixture: "Probabilistic clustering assuming Gaussian-distributed data.",
+    BayesianGaussianMixture: "Gaussian mixture that infers how many of the allowed components are needed; soft assignments.",
+    BisectingKMeans: "Divisive hierarchical K-Means: repeatedly splits one cluster in two; scales to large data."
   },
   reduction: {
     PCA: "Linear projection preserving maximal variance in fewer dimensions.",
     UMAP: "Non-linear projection preserving local and global data structure.",
     TSNE: "Projects high-dimensional data by preserving local similarities.",
-    None: "Without applying dimensionality reduction."
-  }
-};
-
-const paramDescriptions = {
-  clustering: {
-    n_clusters: "Number of clusters to form",
-    init: "Method for initialization",
-    random_state: "Seed for reproducibility",
-    algorithm: "K-Means computation algorithm",
-    damping: "Responsiveness to updates in AffinityPropagation",
-    preference: "Preferences for exemplars",
-    affinity: "Similarity metric used",
-    bandwidth: "Kernel bandwidth for MeanShift",
-    cluster_all: "Whether to assign all points to a cluster",
-    n_neighbors: "Number of neighbors for graph construction",
-    assign_labels: "Method to assign labels in SpectralClustering",
-    linkage: "Linkage criteria for merging clusters",
-    metric: "Distance metric used",
-    eps: "Maximum distance between two samples for DBSCAN",
-    min_samples: "Minimum samples to form a dense region",
-    leaf_size: "Tree leaf size for neighbor queries",
-    algorithm: "Algorithm used for nearest neighbors",
-    min_cluster_size: "Minimum size for a cluster in HDBSCAN",
-    cluster_selection_epsilon: "Distance tolerance for cluster separation",
-    max_cluster_size: "Maximum allowed cluster size",
-    cluster_selection_method: "Strategy to extract clusters",
-    xi: "Minimum steepness for OPTICS clustering structure",
-    threshold: "Radius threshold for subclusters (BIRCH)",
-    branching_factor: "Max children per non-leaf node (BIRCH)",
-    compute_labels: "Whether to compute final labels",
-    n_components: "Number of mixture components",
-    covariance_type: "Covariance matrix type",
-    init_params: "Initialization method for parameters"
-  },
-  reduction: {
-    n_components: "Output dimensionality",
-    n_neighbors: "Size of local neighborhood (UMAP/tSNE)",
-    min_dist: "Minimum distance between embedded points (UMAP)",
-    metric: "Distance metric",
-    perplexity: "Effective number of neighbors (tSNE)",
-    learning_rate: "Learning rate for tSNE",
-    random_state: "Seed for reproducibility"
+    None: "No dimensionality reduction; clustering uses all features."
   }
 };
 
@@ -114,9 +95,12 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [clusterData, setClusterData] = useState(null);
+  const [displayInfo, setDisplayInfo] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [clusterColors, setClusterColors] = useState({});
   const [intensityColumns, setIntensityColumns] = useState([]);
+  const [showClusterDetails, setShowClusterDetails] = useState(true);
+  const [detailsSort, setDetailsSort] = useState({ key: 'cluster', direction: 'asc' });
   const [heatmapCluster, setHeatmapCluster] = useState('summary');
   const [heatmapAggregation, setHeatmapAggregation] = useState('median');
   const [heatmapRowLimit, setHeatmapRowLimit] = useState(250);
@@ -139,7 +123,27 @@ function App() {
   const [selectedProfilesLayout, setSelectedProfilesLayout] = useState({});
   const [selectedProfileNames, setSelectedProfileNames] = useState([]);
 
-  const fileInputRef = useRef(null); 
+  // Run history: the dataset is uploaded once per session and every run is stored server-side.
+  const [sessionId] = useState(createSessionId);
+  const datasetIdRef = useRef(null);
+  const [runs, setRuns] = useState([]);
+  const [activeRunId, setActiveRunId] = useState(null);
+  const [preflightReport, setPreflightReport] = useState(null);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [examples, setExamples] = useState([]);
+  const [selectedExampleId, setSelectedExampleId] = useState('');
+  // Server limits; the defaults apply until /api/limits answers.
+  const [limits, setLimits] = useState({ max_upload_mb: 50 });
+  const [jobProgress, setJobProgress] = useState(null);
+  const [sampling, setSampling] = useState(null);
+  const [clusterProfiles, setClusterProfiles] = useState(null);
+  // Preprocessing and the values that were clustered, e.g. "log2(x + 1), per-row z-score".
+  const [preprocessingOptions, setPreprocessingOptions] = useState({ ...DEFAULT_PREPROCESSING });
+  const [exploreData, setExploreData] = useState(null);
+  const [valueLabel, setValueLabel] = useState('log2(x + 1), per-row z-score');
+  const activeRun = runs.find(run => run.run_id === activeRunId);
+
+  const fileInputRef = useRef(null);
 
   const parseDelimitedHeaderLine = (line, delimiter) => {
     const columns = [];
@@ -244,8 +248,7 @@ function App() {
   useEffect(() => {
     const fetchAlgorithms = async () => {
       try {
-        //const response = await fetch('http://127.0.0.1:5000/api/algorithms');
-        const response = await fetch('/rapcluster/api/algorithms');
+        const response = await fetch(`${API_BASE}/algorithms`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -268,6 +271,36 @@ function App() {
   }, []);
 
   useEffect(() => {
+    fetch(`${API_BASE}/examples`)
+      .then(response => (response.ok ? response.json() : { examples: [] }))
+      .then(data => setExamples(data.examples || []))
+      .catch(e => console.error("Failed to fetch example datasets:", e));
+  }, []);
+
+  useEffect(() => {
+    fetchJson(`${API_BASE}/limits`)
+      .then(setLimits)
+      .catch(e => console.error("Failed to fetch server limits:", e));
+  }, []);
+
+  // A pending "Run anyway" confirmation only applies to the settings it was checked with.
+  useEffect(() => {
+    setAwaitingConfirmation(false);
+  }, [
+    nameColumn, intensityStartIndex, selectedSheetName, selectedReduction, customReductionParams,
+    useDefaultReductionParams, selectedAlgorithm, customAlgorithmParams, useDefaultAlgorithmParams, preprocessingOptions,
+  ]);
+
+  // Closing (or reloading) the page deletes the session's datasets and runs on the server.
+  useEffect(() => {
+    const closeSession = () => {
+      navigator.sendBeacon?.(`${API_BASE}/sessions/${sessionId}/close`);
+    };
+    window.addEventListener('pagehide', closeSession);
+    return () => window.removeEventListener('pagehide', closeSession);
+  }, [sessionId]);
+
+  useEffect(() => {
     if (
       activeTab === "subnetwork" &&
       selectedSubnetwork !== null &&
@@ -282,14 +315,26 @@ function App() {
       alert("No cluster data to download."); 
       return;
     }
+    // The table only holds a sample of large datasets; the server file has every row.
+    if (sampling?.sampled && activeRun) {
+      const link = document.createElement('a');
+      link.href = `${API_BASE}${activeRun.links.labels_tsv}`;
+      link.setAttribute('download', '');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
 
-    const headers = ["Name", "Cluster", "X", "Y", "Color"];
+    const headers = ["Name", "Cluster", "X", "Y", "Color",
+      ...(hasMembership ? ["Membership"] : []), ...(hasRowStability ? ["RowStability"] : [])];
     const tsvRows = sortedClusterData.map(d => [
       d.name,
       d.cluster === -1 ? 'Noise (-1)' : d.cluster, 
       d.x.toFixed(6), 
       d.y.toFixed(6),
-      d.color
+      d.color,
+      ...(hasMembership ? [d.membership ?? ''] : []), ...(hasRowStability ? [d.stability ?? ''] : []),
     ]);
 
     const allRows = [headers.join('\t'), ...tsvRows.map(row => row.join('\t'))];
@@ -312,8 +357,24 @@ function App() {
       console.error("Browser does not support download attribute.");
     }
   };
-  const handleFileChange = async (e) => {
-    const selectedFile = e.target.files[0];
+  const handleFileChange = (e) => loadSelectedFile(e.target.files[0]);
+
+  const loadSelectedFile = async (selectedFile) => {
+    datasetIdRef.current = null;
+    setPreflightReport(null);
+    setExploreData(null);
+    setAwaitingConfirmation(false);
+    if (selectedFile && selectedFile.size > limits.max_upload_mb * 1024 * 1024) {
+      setError(
+        `${selectedFile.name} is ${(selectedFile.size / 1024 ** 2).toFixed(1)} MB, but the RapCluster server accepts files `
+        + `up to ${limits.max_upload_mb} MB (upload limit set by the RapCluster server). `
+        + 'Please remove unused columns or rows, or save the table as xlsx, which is usually smaller.'
+      );
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      selectedFile = null;
+    }
     if (selectedFile) {
       setFile(selectedFile);
       setFileName(selectedFile.name);
@@ -417,7 +478,9 @@ function App() {
       <div className="param-grid">
         {definitions.map(param => (
           <div className="param-item" key={param.name}>
-            <label htmlFor={`${selectedAlgoName}-${param.name}`}>{param.name}:</label>
+            <label htmlFor={`${selectedAlgoName}-${param.name}`}>
+              {param.name}:<HelpTip text={paramHelp(selectedAlgoName, param)} label={param.name} />
+            </label>
             {param.type === 'int' && (
               <input
                 type="number"
@@ -470,68 +533,98 @@ function App() {
     );
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-    setClusterData(null);
-    setMetrics(null);
-    setClusterColors({});
-    setIntensityColumns([]);
-    setHeatmapCluster('summary');
+  const formatParamValue = (value) => (value === null || value === undefined ? 'None' : String(value));
 
-    let details = `Clustering Algorithm: ${selectedAlgorithm}\n`;
-    details += `  → ${methodDescriptions.clustering[selectedAlgorithm] || 'No description.'}\n`;
+  const buildMethodDetails = (algorithm, algorithmValues, reduction, reductionValues) => {
+    const lineFor = (values) => (p) => (
+      `- ${p.name}: ${formatParamValue(p.name in values ? values[p.name] : p.default)}`
+    );
 
-    const clusterDef = algoParams[selectedAlgorithm] || [];
-    const clusterLines = clusterDef.map(p => {
-      const val = useDefaultAlgorithmParams
-        ? p.default
-        : (customAlgorithmParams[p.name] ?? p.default);
-      const desc = p.description ? ` (${p.description})` : '';
-      return `- ${p.name}: ${val}${desc}`;
-    }).join('\n');
-    details += `${clusterLines}\n\n`;
+    let details = `Clustering Algorithm: ${algorithm}\n`;
+    details += `  → ${methodDescriptions.clustering[algorithm] || 'No description.'}\n`;
+    details += `${(algoParams[algorithm] || []).map(lineFor(algorithmValues)).join('\n')}\n\n`;
 
-    if (selectedReduction === 'None') {
+    if (reduction === 'None') {
       details += `Dimensionality Reduction: None\n`;
       details += `  → ${methodDescriptions.reduction.None}\n`;
     } else {
-      details += `Dimensionality Reduction: ${selectedReduction}\n`;
-      details += `  → ${methodDescriptions.reduction[selectedReduction] || 'No description.'}\n`;
-
-      const redDef = reductionParamsDef[selectedReduction] || [];
-      const redLines = redDef.map(p => {
-        const val = useDefaultReductionParams
-          ? p.default
-          : (customReductionParams[p.name] ?? p.default);
-        const desc = p.description ? ` (${p.description})` : '';
-        return `- ${p.name}: ${val}${desc}`;
-      }).join('\n');
-      details += `${redLines}`;
+      details += `Dimensionality Reduction: ${reduction}\n`;
+      details += `  → ${methodDescriptions.reduction[reduction] || 'No description.'}\n`;
+      details += (reductionParamsDef[reduction] || []).map(lineFor(reductionValues)).join('\n');
     }
+    return details;
+  };
 
-    setMethodDetails(details);
-
-    if (!file) {
-      setError('Please select a file first.');
-      setLoading(false);
-      return;
-    }
-
-    if (fileType === 'xlsx' && !selectedSheetName) {
-      setError('Please select an Excel sheet first.');
-      setLoading(false);
-      return;
-    }
-
+  const uploadDataset = async () => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('nameColumn', nameColumn);
-    formData.append('intensityStartIndex', intensityStartIndex);
-    formData.append('sheetName', fileType === 'xlsx' ? selectedSheetName : '');
-    formData.append('reductionMethod', selectedReduction);
-    
+    const data = await fetchJson(
+      `${API_BASE}/sessions/${sessionId}/datasets`,
+      { method: 'POST', body: formData },
+      { uploading: true, uploadLimitMb: limits.max_upload_mb },
+    );
+    datasetIdRef.current = data.dataset_id;
+    return data.dataset_id;
+  };
+
+  const applyRunResult = (data) => {
+    setClusterData(data.cluster_data);
+    setMetrics(data.metrics);
+    setClusterColors(data.cluster_colors);
+    setIntensityColumns(data.intensity_columns || []);
+    setSampling(data.sampling || null);
+    setDisplayInfo(data.display || null);
+    setClusterProfiles(data.cluster_profiles || null);
+    setValueLabel(data.value_label || 'log2(x + 1), per-row z-score');
+    setHeatmapCluster('summary');
+    setSubnetworkData([]);
+    setSelectedSubnetwork(null);
+    setSelectedProfilesData([]);
+    setSelectedProfileNames([]);
+    setActiveTab(previousTab => (previousTab === 'subnetwork' ? 'scatter' : previousTab));
+    setActiveRunId(data.run ? data.run.run_id : null);
+
+    const { data: netData, layout: netLayout } = computeCentroidsAndEdges(data.cluster_data, data.cluster_colors, data.cluster_profiles);
+    setNetworkPlotData(netData);
+    setNetworkPlotLayout(netLayout);
+  };
+
+  // Puts a run's algorithm and reduction settings back into the form so it can be tweaked and re-run.
+  const restoreRunSettings = (run) => {
+    const matchesDefaults = (definitions, values) => definitions.every(p => values[p.name] === p.default);
+
+    const algorithmDefaults = matchesDefaults(algoParams[run.clustering.algorithm] || [], run.clustering.params);
+    setSelectedAlgorithm(run.clustering.algorithm);
+    setUseDefaultAlgorithmParams(algorithmDefaults);
+    setCustomAlgorithmParams(algorithmDefaults ? {} : run.clustering.params);
+
+    const reductionDefaults = matchesDefaults(reductionParamsDef[run.reduction.method] || [], run.reduction.params);
+    setSelectedReduction(run.reduction.method);
+    setUseDefaultReductionParams(reductionDefaults);
+    setPreprocessingOptions({ ...DEFAULT_PREPROCESSING, ...(run.preprocessing.options || {}) });
+    setCustomReductionParams(reductionDefaults ? {} : run.reduction.params);
+
+    setMethodDetails(buildMethodDetails(
+      run.clustering.algorithm, run.clustering.params, run.reduction.method, run.reduction.params
+    ));
+  };
+
+  const handleViewRun = async (run) => {
+    setError(null);
+    setLoading(true);
+    try {
+      const data = await fetchJson(`${API_BASE}${run.links.result}`);
+      applyRunResult(data);
+      restoreRunSettings(run);
+    } catch (e) {
+      console.error("Loading run failed:", e);
+      setError(`Could not load run #${run.number}: ${formatApiError(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const collectRunSettings = () => {
     // Determine which parameters to send for reduction
     let finalReductionParams = {};
     if (!useDefaultReductionParams && selectedReduction !== 'None') {
@@ -553,7 +646,6 @@ function App() {
             finalReductionParams[paramDef.name] = paramDef.default;
         });
     }
-    formData.append('reductionParams', JSON.stringify(finalReductionParams));
 
     let finalAlgorithmParams = {};
     if (!useDefaultAlgorithmParams && selectedAlgorithm) {
@@ -574,70 +666,236 @@ function App() {
             finalAlgorithmParams[paramDef.name] = paramDef.default;
         });
     }
+
+    return { finalReductionParams, finalAlgorithmParams };
+  };
+
+  const buildSettingsFormData = (currentDatasetId, { finalReductionParams, finalAlgorithmParams }, extraFields = {}) => {
+    const formData = new FormData();
+    formData.append('sessionId', sessionId);
+    formData.append('datasetId', currentDatasetId);
+    formData.append('nameColumn', nameColumn);
+    formData.append('intensityStartIndex', intensityStartIndex);
+    formData.append('sheetName', fileType === 'xlsx' ? selectedSheetName : '');
+    formData.append('preprocessing', JSON.stringify(preprocessingOptions));
+    formData.append('reductionMethod', selectedReduction);
+    formData.append('reductionParams', JSON.stringify(finalReductionParams));
     formData.append('clusteringAlgorithm', selectedAlgorithm);
     formData.append('clusteringParams', JSON.stringify(finalAlgorithmParams));
-    
-    console.log("Sending reduction params:", finalReductionParams);
-    console.log("Sending clustering params:", finalAlgorithmParams);
+    Object.entries(extraFields).forEach(([key, value]) => formData.append(key, value));
+    return formData;
+  };
+
+  // Posts the settings for the session's dataset. The file is only uploaded the first time;
+  // if the server-side copy expired it is uploaded once more and the request is retried.
+  const postWithDataset = async (path, settings, extraFields) => {
+    const send = (currentDatasetId) => fetchJson(`${API_BASE}${path}`, {
+      method: 'POST',
+      body: buildSettingsFormData(currentDatasetId, settings, extraFields),
+    });
 
     try {
-      //const response = await fetch('http://127.0.0.1:5000/api/cluster', {
-      const response = await fetch('/rapcluster/api/cluster', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      return await send(datasetIdRef.current || await uploadDataset());
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'dataset_not_found') {
+        return send(await uploadDataset());
       }
+      throw e;
+    }
+  };
 
-      const data = await response.json();
-      setClusterData(data.cluster_data);
-      setMetrics(data.metrics);
-      setClusterColors(data.cluster_colors);
-      setIntensityColumns(data.intensity_columns || []);
-      const algoParamsUsed = (algoParams[selectedAlgorithm] || []).map(p => {
-        const val = useDefaultAlgorithmParams
-          ? p.default
-          : (customAlgorithmParams[p.name] ?? p.default);
-        const desc = paramDescriptions.clustering[p.name] || "";
-        return `- ${p.name}: ${val}${desc ? ` (${desc})` : ''}`;
-      }).join('\n');
-      
-      const redParamsUsed = selectedReduction === 'None'
-      ? 'Dimensionality Reduction: Not applied'
-      : `Dimensionality Reduction: ${selectedReduction}\n` + 
-        (reductionParamsDef[selectedReduction] || []).map(p => {
-          const val = useDefaultReductionParams
-            ? p.default
-            : (customReductionParams[p.name] ?? p.default);
-          const desc = paramDescriptions.reduction[p.name] || "";
-          return `- ${p.name}: ${val}${desc ? ` (${desc})` : ''}`;
-        }).join('\n');
-      
-      const methodText = `Clustering Algorithm: ${selectedAlgorithm}\n${algoParamsUsed}\n\n${redParamsUsed}`;
-      const methodFull = 
-        `Clustering Algorithm: ${selectedAlgorithm}\n` +
-        `  → ${methodDescriptions.clustering[selectedAlgorithm] || 'No description.'}\n` +
-        algoParamsUsed + '\n\n' +
-        redParamsUsed +
-        (selectedReduction !== 'None' ? `\n  → ${methodDescriptions.reduction[selectedReduction] || 'No description.'}` : '');
+  const validateInputs = () => {
+    if (!file) {
+      setError('Please select a file first.');
+      return false;
+    }
+    if (fileType === 'xlsx' && !selectedSheetName) {
+      setError('Please select an Excel sheet first.');
+      return false;
+    }
+    return true;
+  };
 
-      // setMethodDetails(methodFull);
-      const { data: netData, layout: netLayout } = computeCentroidsAndEdges(data.cluster_data, data.cluster_colors);
-      setNetworkPlotData(netData);
-      setNetworkPlotLayout(netLayout);
+  const runPreflight = async (settings) => {
+    const data = await postWithDataset(`/sessions/${sessionId}/preflight`, settings);
+    setPreflightReport(data);
+    return data;
+  };
+
+  const executeRun = async (settings) => {
+    setClusterData(null);
+    setMetrics(null);
+    setClusterColors({});
+    setIntensityColumns([]);
+    setSampling(null);
+    setDisplayInfo(null);
+    setClusterProfiles(null);
+    setHeatmapCluster('summary');
+    setActiveRunId(null);
+    setMethodDetails(buildMethodDetails(
+      selectedAlgorithm, settings.finalAlgorithmParams, selectedReduction, settings.finalReductionParams
+    ));
+
+    console.log("Sending reduction params:", settings.finalReductionParams);
+    console.log("Sending clustering params:", settings.finalAlgorithmParams);
+
+    // The server starts a background job (HTTP 202); its status is polled until it finishes.
+    const { run } = await postWithDataset('/cluster', settings);
+    setRuns(previousRuns => [...previousRuns, run]);
+    setJobProgress({ run, stage: 'starting', message: 'Starting the analysis', elapsed: 0 });
+    let status;
+    try {
+      status = await pollJob(API_BASE, run.links.status, {
+        onProgress: (update) => setJobProgress({
+          run, stage: update.stage, message: update.message, elapsed: update.elapsed_seconds,
+        }),
+      });
+    } finally {
+      setJobProgress(null);
+    }
+    if (status.run) handleRunUpdated(status.run);
+    if (status.state !== 'success') {
+      const outcome = status.state === 'cancelled' ? 'was cancelled' : 'failed';
+      throw new ApiError(`Run #${run.number} ${outcome}: ${status.error}`, { code: status.error_code, hint: status.hint });
+    }
+    applyRunResult(await fetchJson(`${API_BASE}${run.links.result}`));
+  };
+
+  const handleCancelRun = async () => {
+    if (!jobProgress) return;
+    try {
+      await fetchJson(`${API_BASE}${jobProgress.run.links.cancel}?kind=cluster`, { method: 'POST' });
+    } catch (e) {
+      setError(`Could not cancel run #${jobProgress.run.number}: ${formatApiError(e)}`);
+    }
+  };
+
+  const formatDuration = (seconds) => (
+    seconds >= 60 ? `${Math.round(seconds / 6) / 10} min` : `${Math.round(seconds)} s`
+  );
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setAwaitingConfirmation(false);
+    if (!validateInputs()) return;
+
+    setLoading(true);
+    try {
+      const settings = collectRunSettings();
+      // Unsuitable algorithm–dataset combinations or data problems need an explicit confirmation.
+      const report = await runPreflight(settings);
+      if (report.has_data_errors || report.compatibility.overall !== 'recommended') {
+        setAwaitingConfirmation(true);
+        return;
+      }
+      await executeRun(settings);
     } catch (e) {
       console.error("Clustering failed:", e);
-      setError(`Error during clustering: ${e.message}`);
+      setError(`Error during clustering: ${formatApiError(e)}`);
     } finally {
       setLoading(false);
     }
-  
   };
-  
-  const computeCentroidsAndEdges = (data, clusterColors) => {
+
+  const handleRunAnyway = async () => {
+    setAwaitingConfirmation(false);
+    setError(null);
+    setLoading(true);
+    try {
+      await executeRun(collectRunSettings());
+    } catch (e) {
+      console.error("Clustering failed:", e);
+      setError(`Error during clustering: ${formatApiError(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Parameter sweep: the trials use the current settings with the swept values replaced.
+  const handleStartSweep = async (sweepConfig) => {
+    setError(null);
+    if (!validateInputs()) return null;
+    return postWithDataset(`/sessions/${sessionId}/sweeps`, collectRunSettings(), { sweep: JSON.stringify(sweepConfig) });
+  };
+
+  const refreshRuns = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/sessions/${sessionId}/runs`);
+      setRuns(data.runs);
+    } catch (e) {
+      console.error('Refreshing the run list failed:', e);
+    }
+  };
+
+  const handleCheckOnly = async () => {
+    setError(null);
+    setAwaitingConfirmation(false);
+    if (!validateInputs()) return;
+
+    setLoading(true);
+    try {
+      await runPreflight(collectRunSettings());
+    } catch (e) {
+      setError(`Preflight check failed: ${formatApiError(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExplore = async () => {
+    setError(null);
+    if (!validateInputs()) return;
+    setLoading(true);
+    try {
+      setExploreData(await postWithDataset(`/sessions/${sessionId}/explore`, collectRunSettings()));
+    } catch (e) {
+      setError(`Exploratory analysis failed: ${formatApiError(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRunUpdated = (updatedRun) => {
+    setRuns(previousRuns => previousRuns.map(run => (run.run_id === updatedRun.run_id ? updatedRun : run)));
+    // A finished stability analysis adds row stability to the displayed rows of the active run.
+    if (updatedRun.run_id === activeRunId && updatedRun.stability && updatedRun.links?.result) {
+      fetchJson(`${API_BASE}${updatedRun.links.result}`)
+        .then(data => setClusterData(data.cluster_data))
+        .catch(() => {});  // the table simply keeps its previous columns
+    }
+  };
+
+  const handleLoadExample = async () => {
+    const example = examples.find(item => item.id === selectedExampleId);
+    if (!example) return;
+
+    setError(null);
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/examples/${example.id}/file`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const blob = await response.blob();
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      await loadSelectedFile(new File([blob], example.filename, { type: 'text/tab-separated-values' }));
+      setNameColumn(example.name_column);
+      setIntensityStartIndex(example.intensity_start_index);
+      setPreprocessingOptions({ ...DEFAULT_PREPROCESSING, ...(example.preprocessing || {}) });
+    } catch (e) {
+      setError(`Could not load example data: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const computeCentroidsAndEdges = (data, clusterColors, profiles) => {
+    // Cluster sizes from the full data; the points may be a sample of a large dataset.
+    const fullSizes = {};
+    if (profiles) profiles.clusters.forEach((cluster, index) => { fullSizes[cluster] = profiles.sizes[index]; });
     const clusters = {};
     data.forEach(d => {
       if (!clusters[d.cluster]) clusters[d.cluster] = [];
@@ -647,7 +905,7 @@ function App() {
     const centroids = Object.entries(clusters).map(([cluster, points]) => {
       const meanX = points.reduce((sum, p) => sum + p[0], 0) / points.length;
       const meanY = points.reduce((sum, p) => sum + p[1], 0) / points.length;
-      return { cluster: parseInt(cluster), x: meanX, y: meanY, size: points.length };
+      return { cluster: parseInt(cluster), x: meanX, y: meanY, size: fullSizes[cluster] ?? points.length };
     });
   
     const maxClusterSize = Math.max(...centroids.map(c => c.size));
@@ -720,7 +978,7 @@ function App() {
         yaxis: { title: 'Y', showgrid: false, zeroline: false, showticklabels: true },
         hovermode: 'closest',
         height: 700,
-        width: 1000,
+        autosize: true,
         plot_bgcolor: '#fcfcfc',
         paper_bgcolor: '#fcfcfc',
       }
@@ -831,7 +1089,7 @@ function App() {
     setSubnetworkLayout({
       title: `Sub-network of Cluster ${clusterId} (Top ${topNNeighbors} Connections)`,
       height: 700,
-      width: 1000,
+      autosize: true,
       xaxis: { visible: false },
       yaxis: { visible: false },
       hovermode: 'closest',
@@ -843,7 +1101,7 @@ function App() {
     setSelectedSubnetwork(clusterId);
   };
 
-  const handlePointsSelected = (points, clusterColors) => {
+  const handlePointsSelected = async (points, clusterColors) => {
     if (!points || !points.points || points.points.length === 0) {
         setSelectedProfilesData([]);
         setSelectedProfilesLayout({});
@@ -855,15 +1113,30 @@ function App() {
     const selectedNames = points.points.map(p => p.hovertext.split('<br>')[0].replace('Name: ', '')); // Extract name from hovertext
     const selectedNodes = clusterData.filter(d => selectedNames.includes(d.name) && d.cluster === selectedSubnetwork);
 
+    // Raw log10 intensities are fetched on demand to keep the main result small.
+    const intensitiesByName = {};
+    try {
+        const data = await fetchJson(`${API_BASE}${activeRun.links.profiles}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ names: selectedNodes.map(node => node.name) }),
+        });
+        data.profiles.forEach(profile => { intensitiesByName[profile.name] = profile.intensities; });
+    } catch (e) {
+        setError(`Could not load the selected profiles: ${formatApiError(e)}`);
+        return;
+    }
+
     const linePlotTraces = [];
     const namesForCaption = [];
 
     selectedNodes.forEach(node => {
-        if (node.intensities && node.intensities.length > 0) {
-            const numDimensions = node.intensities.length;
+        const intensities = intensitiesByName[node.name];
+        if (intensities && intensities.length > 0) {
+            const numDimensions = intensities.length;
             linePlotTraces.push({
                 x: Array.from({ length: numDimensions }, (_, i) => `${i + 1}`),
-                y: node.intensities,
+                y: intensities,
                 mode: 'lines',
                 name: node.name,
                 line: { color: clusterColors[node.cluster], width: 1.5 }, // Use cluster color or a consistent color
@@ -881,7 +1154,7 @@ function App() {
         yaxis: { title: 'Intensity/Value' },
         hovermode: 'closest',
         height: 500,
-        width: 800,
+        autosize: true,
         plot_bgcolor: '#fcfcfc',
         paper_bgcolor: '#fcfcfc',
         showlegend: true // Show legend to identify individual lines
@@ -904,14 +1177,52 @@ function App() {
     hoverinfo: 'text'
   }] : [];
 
-  const sortedClusterData = clusterData
-    ? [...clusterData].sort((a, b) => {
-        if (a.cluster !== b.cluster) {
-          return a.cluster - b.cluster;
-        }
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-      })
-    : [];
+  // Cluster Details table (and its TSV download) follow the column the user sorted by; ties fall back to name.
+  const sortedClusterData = useMemo(() => {
+    if (!clusterData) return [];
+    const compareText = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
+    const comparators = {
+      name: (a, b) => compareText(a.name, b.name),
+      cluster: (a, b) => a.cluster - b.cluster,
+      x: (a, b) => a.x - b.x,
+      y: (a, b) => a.y - b.y,
+      color: (a, b) => compareText(a.color, b.color),
+      membership: (a, b) => (a.membership ?? -1) - (b.membership ?? -1),
+      stability: (a, b) => (a.stability ?? -1) - (b.stability ?? -1),
+    };
+    const sign = detailsSort.direction === 'asc' ? 1 : -1;
+    return [...clusterData].sort((a, b) => (
+      sign * comparators[detailsSort.key](a, b) || compareText(a.name, b.name)
+    ));
+  }, [clusterData, detailsSort]);
+
+  // Optional per-row columns: membership (HDBSCAN, mixture models) and row stability (after a stability analysis).
+  const hasMembership = Boolean(clusterData?.some(d => d.membership !== undefined));
+  const hasRowStability = Boolean(clusterData?.some(d => d.stability !== undefined));
+  const formatShare = (value) => (value === undefined || value === null ? '–' : value.toFixed(2));
+
+  const toggleDetailsSort = (key) => {
+    setDetailsSort(previous => ({
+      key,
+      direction: previous.key === key && previous.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  const renderSortableHeader = (key, label, style) => {
+    const isSorted = detailsSort.key === key;
+    return (
+      <th
+        className="sortable-header"
+        style={style}
+        onClick={() => toggleDetailsSort(key)}
+        aria-sort={isSorted ? (detailsSort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+        title={`Sort by ${label}`}
+      >
+        {label}
+        <span className="sort-indicator">{isSorted ? (detailsSort.direction === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}</span>
+      </th>
+    );
+  };
 
   const plotLayout = {
     title: `Clustering Results (${selectedAlgorithm} with ${selectedReduction})`,
@@ -919,7 +1230,7 @@ function App() {
     yaxis: { title: 'Dimension 2' },
     hovermode: 'closest',
     height: 700,
-    width: 1000,
+    autosize: true,
     margin: { l: 50, r: 50, b: 50, t: 50 },
     plot_bgcolor: '#f5f5f5',
     paper_bgcolor: '#f5f5f5',
@@ -941,6 +1252,16 @@ function App() {
     }
     return Array.from({ length: profileLength }, (_, i) => `Dimension ${i + 1}`);
   }, [clusterData, intensityColumns, getProfileValues]);
+
+  const clusterSizes = useMemo(() => {
+    const sizes = {};
+    if (clusterProfiles) {
+      clusterProfiles.clusters.forEach((cluster, index) => { sizes[cluster] = clusterProfiles.sizes[index]; });
+    } else {
+      (clusterData || []).forEach(row => { sizes[row.cluster] = (sizes[row.cluster] || 0) + 1; });
+    }
+    return sizes;
+  }, [clusterProfiles, clusterData]);
 
   const heatmapClusters = useMemo(() => {
     if (!clusterData) return [];
@@ -1109,6 +1430,17 @@ function App() {
   const heatmapSummaryRows = useMemo(() => {
     if (!clusterData || heatmapColumnLabels.length === 0) return [];
 
+    // Summaries computed on the server from all rows (the points may be a sample).
+    if (clusterProfiles) {
+      const values = heatmapAggregation === 'mean' ? clusterProfiles.mean : clusterProfiles.median;
+      return clusterProfiles.clusters.map((clusterId, index) => ({
+        clusterId,
+        label: `${clusterId === -1 ? 'Noise (-1)' : `Cluster ${clusterId}`}, n=${clusterProfiles.sizes[index]}`,
+        color: clusterColors[clusterId] || '#808080',
+        values: values[index],
+      }));
+    }
+
     return heatmapClusters.map(clusterId => {
       const rows = clusterData.filter(row => row.cluster === clusterId);
       return {
@@ -1118,7 +1450,7 @@ function App() {
         values: heatmapColumnLabels.map((_, columnIndex) => aggregateProfileValue(rows, columnIndex))
       };
     });
-  }, [clusterData, clusterColors, heatmapClusters, heatmapColumnLabels, aggregateProfileValue]);
+  }, [clusterData, clusterProfiles, heatmapAggregation, clusterColors, heatmapClusters, heatmapColumnLabels, aggregateProfileValue]);
 
   const selectedHeatmapRows = useMemo(() => {
     if (!clusterData || heatmapCluster === 'summary') return [];
@@ -1131,8 +1463,8 @@ function App() {
   const visibleHeatmapRows = selectedHeatmapRows.slice(0, heatmapRowLimit);
   const dendrogramRowLimit = 250;
   const heatmapValueLabel = heatmapCluster === 'summary'
-    ? `${heatmapAggregation === 'mean' ? 'Mean' : 'Median'} row-scaled log2-transformed intensity`
-    : 'Row-scaled log2-transformed intensity';
+    ? `${heatmapAggregation === 'mean' ? 'Mean' : 'Median'} value (${valueLabel})`
+    : `Value (${valueLabel})`;
   const heatmapRows = useMemo(() => (
     heatmapCluster === 'summary'
       ? heatmapSummaryRows
@@ -1205,7 +1537,7 @@ function App() {
       ? `Cluster ${heatmapAggregation === 'mean' ? 'Mean' : 'Median'} Profiles`
       : `Cluster ${heatmapCluster} Profiles`,
     height: heatmapHeight,
-    width: 1100,
+    autosize: true,
     margin: {
       l: heatmapLeftMargin,
       r: 40,
@@ -1268,6 +1600,10 @@ function App() {
   // --- Helper to clear file input ---
   const clearFileInput = () => {
     setFile(null);
+    datasetIdRef.current = null;
+    setPreflightReport(null);
+    setExploreData(null);
+    setAwaitingConfirmation(false);
     setFileName('');
     setFileType('');
     setColumnNames([]);
@@ -1343,7 +1679,7 @@ function App() {
         <form onSubmit={handleSubmit} className="clustering-form">
           <section className="input-section">
           <h2>
-              1. Upload Data{''}
+              1. Upload Data<HelpTip text={HELP.upload} label="Upload data" />
               <a
                 href="https://raw.githubusercontent.com/lutfia95/RapCluster/main/example_data.tsv"
                 download="example_data.tsv"
@@ -1353,7 +1689,7 @@ function App() {
               </a>
             </h2>
             <div className="form-group">
-              <label htmlFor="file-upload">Select File (CSV/TSV/Excel):</label>
+              <label htmlFor="file-upload">Select File (CSV/TSV/Excel):<HelpTip text={HELP.upload} label="file upload" /></label>
               <input 
                 type="file" 
                 id="file-upload" 
@@ -1364,9 +1700,35 @@ function App() {
               {fileName && <span className="file-name">{fileName} <button type="button" onClick={clearFileInput}>x</button></span>}
             </div>
 
+            {examples.length > 0 && (
+              <div className="form-group">
+                <label htmlFor="example-select">Or load example data:<HelpTip text={HELP.example} label="example data" /></label>
+                <div className="example-loader">
+                  <select
+                    id="example-select"
+                    value={selectedExampleId}
+                    onChange={(e) => setSelectedExampleId(e.target.value)}
+                  >
+                    <option value="">Choose an example…</option>
+                    {examples.map(example => (
+                      <option key={example.id} value={example.id}>{example.title}</option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={handleLoadExample} disabled={!selectedExampleId || loading}>
+                    Load
+                  </button>
+                </div>
+                {selectedExampleId && (
+                  <span className="example-description">
+                    {examples.find(example => example.id === selectedExampleId)?.description}
+                  </span>
+                )}
+              </div>
+            )}
+
             {fileType === 'xlsx' && excelSheetNames.length > 0 && (
               <div className="form-group">
-                <label htmlFor="sheet-selector">Sheet:</label>
+                <label htmlFor="sheet-selector">Sheet:<HelpTip text={HELP.sheet} label="sheet" /></label>
                 <select
                   id="sheet-selector"
                   value={selectedSheetName}
@@ -1381,7 +1743,7 @@ function App() {
             )}
 
             <div className="form-group">
-              <label htmlFor="name-column">Name of Node Column:</label>
+              <label htmlFor="name-column">Name of Node Column:<HelpTip text={HELP.nameColumn} label="name column" /></label>
               {['csv', 'tsv', 'xlsx'].includes(fileType) && columnNames.length > 0 ? (
                 <select
                   id="name-column"
@@ -1406,7 +1768,7 @@ function App() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="intensity-start-index">Data Start Column Index (0-based):</label>
+              <label htmlFor="intensity-start-index">Data Start Column Index (0-based):<HelpTip text={HELP.startIndex} label="data start column" /></label>
               <input
                 type="number"
                 id="intensity-start-index"
@@ -1417,12 +1779,21 @@ function App() {
               />
             </div>
           </section>
+
+          <PreprocessingOptions
+            options={preprocessingOptions}
+            onChange={setPreprocessingOptions}
+            onExplore={handleExplore}
+            disabled={loading || !file}
+          />
+
           <section className="reduction-section">
-            <h2>2. Dimensionality Reduction</h2>
+            <h2>3. Dimensionality Reduction<HelpTip text={HELP.reduction} label="dimensionality reduction" /></h2>
              <p style={{ marginTop: '-10px' }}>
                 <button
                   type="button"
                   onClick={() => setShowReductionModal(true)}
+                  title={HELP.learnMore}
                   style={{
                     fontSize: '0.9em',
                     background: 'none',
@@ -1436,7 +1807,9 @@ function App() {
                 </button>
               </p>
             <div className="form-group">
-              <label htmlFor="reduction-method">Method:</label>
+              <label htmlFor="reduction-method">
+                Method:<HelpTip text={REDUCTION_HELP[selectedReduction]} label={selectedReduction} />
+              </label>
               <select
                 id="reduction-method"
                 value={selectedReduction}
@@ -1447,9 +1820,10 @@ function App() {
                 }}
               >
                 {availableReductions.map(method => (
-                  <option key={method} value={method}>{method}</option>
+                  <option key={method} value={method} title={REDUCTION_HELP[method]}>{method}</option>
                 ))}
               </select>
+              <small className="method-hint">{methodDescriptions.reduction[selectedReduction]}</small>
             </div>
 
             {selectedReduction !== 'None' && (
@@ -1463,7 +1837,7 @@ function App() {
                         if(e.target.checked) setCustomReductionParams({}); // Clear custom if defaulting
                     }}
                   />
-                  Use Default Parameters
+                  Use Default Parameters<HelpTip text={HELP.useDefaults} label="default parameters" />
                 </label>
                 {!useDefaultReductionParams && (
                   <div className="param-custom-settings">
@@ -1476,11 +1850,12 @@ function App() {
           </section>
 
           <section className="clustering-section">
-            <h2>3. Clustering Algorithm</h2>
+            <h2>4. Clustering Algorithm<HelpTip text={HELP.clustering} label="clustering algorithm" /></h2>
             <p style={{ marginTop: '-10px' }}>
               <button
                 type="button"
                 onClick={() => setShowClusteringModal(true)}
+                title={HELP.learnMore}
                 style={{
                   fontSize: '0.9em',
                   background: 'none',
@@ -1494,7 +1869,9 @@ function App() {
               </button>
             </p>
             <div className="form-group">
-              <label htmlFor="clustering-algorithm">Algorithm:</label>
+              <label htmlFor="clustering-algorithm">
+                Algorithm:<HelpTip text={ALGORITHM_HELP[selectedAlgorithm]} label={selectedAlgorithm} />
+              </label>
               <select
                 id="clustering-algorithm"
                 value={selectedAlgorithm}
@@ -1506,9 +1883,10 @@ function App() {
                 required
               >
                 {availableAlgos.map(algo => (
-                  <option key={algo} value={algo}>{algo}</option>
+                  <option key={algo} value={algo} title={ALGORITHM_HELP[algo]}>{algo}</option>
                 ))}
               </select>
+              {selectedAlgorithm && <small className="method-hint">{methodDescriptions.clustering[selectedAlgorithm]}</small>}
             </div>
 
             {selectedAlgorithm && (
@@ -1522,7 +1900,7 @@ function App() {
                         if(e.target.checked) setCustomAlgorithmParams({}); // Clear custom if defaulting
                     }}
                   />
-                  Use Default Parameters
+                  Use Default Parameters<HelpTip text={HELP.useDefaults} label="default parameters" />
                 </label>
                 {!useDefaultAlgorithmParams && (
                   <div className="param-custom-settings">
@@ -1548,23 +1926,115 @@ function App() {
               </a>
             </p>
 
-          <button type="submit" className="submit-button" disabled={loading || !file}>
+          <button type="button" className="check-button" onClick={handleCheckOnly} disabled={loading || !file} title={HELP.check}>
+            Check data &amp; settings
+          </button>
+          <button type="submit" className="submit-button" disabled={loading || !file} title={HELP.run}>
             {loading ? 'Processing...' : 'Run Clustering'}
           </button>
         </form>
 
         {error && <div className="error-message">{error}</div>}
 
+        {jobProgress && (
+          <div className="job-progress" role="status">
+            <span className="job-progress-spinner" aria-hidden="true" />
+            <span className="job-progress-text">
+              <strong>Run #{jobProgress.run.number} is running:</strong> {jobProgress.message || jobProgress.stage}
+              <span className="job-progress-elapsed">
+                {' '}({formatDuration(jobProgress.elapsed)} elapsed; runs are stopped after {formatDuration(jobProgress.run.limits.timeout_seconds)})
+              </span>
+            </span>
+            <button type="button" onClick={handleCancelRun}>Cancel run</button>
+          </div>
+        )}
+
+        <ExploratoryAnalysis data={exploreData} onClose={() => setExploreData(null)} />
+
+        <ParameterSweep
+          algorithm={selectedAlgorithm}
+          paramDefs={algoParams[selectedAlgorithm]}
+          reductionMethod={selectedReduction}
+          canRun={Boolean(file)}
+          apiBase={API_BASE}
+          runs={runs}
+          loading={loading}
+          onStart={handleStartSweep}
+          onRefreshRuns={refreshRuns}
+          onView={handleViewRun}
+        />
+
+        <PreflightReport
+          report={preflightReport}
+          awaitingConfirmation={awaitingConfirmation}
+          onRunAnyway={handleRunAnyway}
+          onCancel={() => setAwaitingConfirmation(false)}
+          onClose={() => { setPreflightReport(null); setAwaitingConfirmation(false); }}
+          loading={loading}
+        />
+
+        <RunHistory
+          runs={runs}
+          activeRunId={activeRunId}
+          apiBase={API_BASE}
+          loading={loading}
+          onView={handleViewRun}
+          onLoadSettings={restoreRunSettings}
+        />
+
+        <Leaderboard
+          runs={runs}
+          apiBase={API_BASE}
+          loading={loading}
+          onView={handleViewRun}
+          onRunUpdated={handleRunUpdated}
+        />
+
+        <RunComparison runs={runs} apiBase={API_BASE} sessionId={sessionId} />
+
         {metrics && clusterData && (
           <section className="results-section">
-            <h2>Clustering Results</h2>
+            <h2>
+              Clustering Results
+              {activeRun && ` — Run #${activeRun.number}`}
+              <HelpTip text={HELP.results} label="results" />
+            </h2>
+            {activeRun && (
+              <a className="download-all-button" href={`${API_BASE}${activeRun.links.download_zip}`} title={HELP.downloadZip}>
+                Download All (ZIP)
+              </a>
+            )}
+            {sampling?.sampled && (
+              <div className="sampling-note">
+                Large dataset: the plots and the table show {sampling.shown.toLocaleString()} of {sampling.total.toLocaleString()} rows
+                (a sample stratified by cluster, so every cluster is included). Cluster sizes, the cluster summary heatmap and all
+                downloads (TSV, ZIP) use all rows; the silhouette score is computed on a random sample of up to {(limits.silhouette_sample_size || 5000).toLocaleString()} rows.
+              </div>
+            )}
+            {displayInfo && (
+              <div className="compare-note display-note">
+                Clustering and metrics used {displayInfo.clustering_dims} dimension(s); the scatter plot shows {displayInfo.description}.
+              </div>
+            )}
             <div className="metrics-summary">
               <h3>Metrics:</h3>
-              <p><strong>Clusters Found:</strong> {metrics.n_clusters}</p>
-              <p><strong>Silhouette Score:</strong> {metrics.silhouette_score.toFixed(3)} (Higher is better)</p>
-              <p><strong>Calinski-Harabasz Score:</strong> {metrics.calinski_harabasz_score.toFixed(3)} (Higher is better)</p>
-              <p><strong>Davies-Bouldin Score:</strong> {metrics.davies_bouldin_score.toFixed(3)} (Lower is better)</p>
-              <p><strong>Runtime:</strong> {metrics.runtime_seconds.toFixed(2)} seconds</p>
+              <p><strong>Clusters Found:</strong><HelpTip text={HELP.clustersFound} label="clusters found" /> {metrics.n_clusters}</p>
+              <p><strong>Silhouette Score:</strong><HelpTip text={HELP.silhouette} label="Silhouette score" /> {metrics.silhouette_score.toFixed(3)} (Higher is better)</p>
+              <p><strong>Calinski-Harabasz Score:</strong><HelpTip text={HELP.calinskiHarabasz} label="Calinski-Harabasz score" /> {metrics.calinski_harabasz_score.toFixed(3)} (Higher is better)</p>
+              <p><strong>Davies-Bouldin Score:</strong><HelpTip text={HELP.daviesBouldin} label="Davies-Bouldin score" /> {metrics.davies_bouldin_score.toFixed(3)} (Lower is better)</p>
+              {Number.isFinite(metrics.dbcv) && (
+                <p><strong>DBCV:</strong><HelpTip text={HELP.dbcv} label="DBCV" /> {metrics.dbcv.toFixed(3)} (Higher is better; density-based validation)</p>
+              )}
+              {Number.isFinite(metrics.bic) && (
+                <p><strong>BIC / AIC:</strong><HelpTip text={HELP.bicAic} label="BIC and AIC" /> {metrics.bic.toFixed(1)} / {metrics.aic.toFixed(1)} (Lower is better; compare runs on the same data only)</p>
+              )}
+              {Number.isFinite(metrics.mean_membership) && (
+                <p><strong>Mean membership:</strong><HelpTip text={HELP.meanMembership} label="mean membership" /> {metrics.mean_membership.toFixed(3)} (average assignment probability of clustered rows)</p>
+              )}
+              {activeRun?.model?.n_components_used !== undefined && (
+                <p><strong>Components used:</strong><HelpTip text={HELP.componentsUsed} label="components used" /> {activeRun.model.n_components_used} of at most {activeRun.model.n_components_max}</p>
+              )}
+              <p><strong>Runtime:</strong><HelpTip text={HELP.runtime} label="runtime" /> {metrics.runtime_seconds.toFixed(2)} seconds</p>
             </div>
 
             <div className="visualization">
@@ -1573,28 +2043,46 @@ function App() {
               <div className="tab-buttons">
                 <button
                   onClick={() => setActiveTab("scatter")}
+                  title={HELP.tabScatter}
                   className={activeTab === "scatter" ? "active" : ""}
                 >
                   Scatter Plot
                 </button>
                 <button
                   onClick={() => setActiveTab("network")}
+                  title={HELP.tabNetwork}
                   className={activeTab === "network" ? "active" : ""}
                 >
                   Clusters Network
                 </button>
                 <button
+                  onClick={() => setActiveTab("subnetwork")}
+                  title={HELP.tabSubnetwork}
+                  className={activeTab === "subnetwork" ? "active" : ""}
+                  disabled={!subnetworkData.length}
+                >
+                  Sub-network View
+                </button>
+                <button
                   onClick={() => setActiveTab("heatmap")}
+                  title={HELP.tabHeatmap}
                   className={activeTab === "heatmap" ? "active" : ""}
                 >
                   Heatmap
                 </button>
                 <button
-                  onClick={() => setActiveTab("subnetwork")}
-                  className={activeTab === "subnetwork" ? "active" : ""}
-                  disabled={!subnetworkData.length}
+                  onClick={() => setActiveTab("characterization")}
+                  title={HELP.tabCharacterization}
+                  className={activeTab === "characterization" ? "active" : ""}
                 >
-                  Sub-network View
+                  Characterization
+                </button>
+                <button
+                  onClick={() => setActiveTab("stability")}
+                  title={HELP.tabStability}
+                  className={activeTab === "stability" ? "active" : ""}
+                >
+                  Stability
                 </button>
               </div>
 
@@ -1603,6 +2091,8 @@ function App() {
                   <Plot
                     data={plotData}
                     layout={plotLayout}
+                    useResizeHandler
+                    style={{ width: '100%' }}
                     config={{
                       responsive: true,
                       displayModeBar: true,
@@ -1641,6 +2131,8 @@ function App() {
                   <Plot
                     data={networkPlotData}
                     layout={networkPlotLayout}
+                    useResizeHandler
+                    style={{ width: '100%' }}
                     config={{
                       responsive: true,
                       displayModeBar: true,
@@ -1676,7 +2168,7 @@ function App() {
               {activeTab === "heatmap" && (
                 <>
                   <div className="heatmap-explanation">
-                    <strong>Values:</strong> row-scaled log2-transformed intensities.
+                    <strong>Values:</strong> {valueLabel}.
                     <span> The dendrogram is hierarchical ordering for the heatmap profiles, not a separate clustering algorithm.</span>
                   </div>
 
@@ -1689,7 +2181,7 @@ function App() {
                       >
                         <option value="summary">Cluster summary</option>
                         {heatmapClusters.map(clusterId => {
-                          const count = clusterData.filter(row => row.cluster === clusterId).length;
+                          const count = clusterSizes[clusterId] ?? 0;
                           const label = clusterId === -1 ? `Noise (-1), n=${count}` : `Cluster ${clusterId}, n=${count}`;
                           return (
                             <option key={clusterId} value={String(clusterId)}>
@@ -1749,6 +2241,8 @@ function App() {
                       <Plot
                         data={heatmapData}
                         layout={heatmapLayout}
+                    useResizeHandler
+                    style={{ width: '100%' }}
                         config={{
                           responsive: true,
                           displayModeBar: true,
@@ -1779,7 +2273,7 @@ function App() {
                   <div className="plot-caption">
                     <h4>Caption Template:</h4>
                     <p>
-                      Heatmap of <strong>row-scaled log2-transformed intensity profiles</strong> after clustering with{" "}
+                      Heatmap of <strong>preprocessed profiles ({valueLabel})</strong> after clustering with{" "}
                       <strong>{selectedAlgorithm}</strong>. Rows are{" "}
                       {heatmapCluster === 'summary'
                         ? `${heatmapAggregation} cluster profiles`
@@ -1788,6 +2282,14 @@ function App() {
                     </p>
                   </div>
                 </>
+              )}
+
+              {activeTab === "characterization" && activeRun && (
+                <ClusterCharacterization run={activeRun} apiBase={API_BASE} clusterColors={clusterColors} />
+              )}
+
+              {activeTab === "stability" && activeRun && (
+                <StabilityAnalysis run={activeRun} apiBase={API_BASE} onRunUpdated={handleRunUpdated} />
               )}
 
               {activeTab === "subnetwork" && (
@@ -1825,7 +2327,6 @@ function App() {
                         </button>
                     </div>
 
-                    {}
                     <>
                         <div style={{ marginBottom: '10px', textAlign: 'center' }}>
                             <label>
@@ -1844,6 +2345,8 @@ function App() {
                         <Plot
                             data={subnetworkData}
                             layout={subnetworkLayout}
+                    useResizeHandler
+                    style={{ width: '100%' }}
                             onSelected={(points) => handlePointsSelected(points, clusterColors)}
                             config={{
                                 responsive: true,
@@ -1869,6 +2372,8 @@ function App() {
                                 <Plot
                                     data={selectedProfilesData}
                                     layout={selectedProfilesLayout}
+                    useResizeHandler
+                    style={{ width: '100%' }}
                                     config={{
                                         responsive: true,
                                         displayModeBar: true,
@@ -1903,7 +2408,7 @@ function App() {
                 marginTop: '20px',
                 marginBottom: '20px'
               }}>
-                <h3 style={{ color: '#6a1b9a', marginBottom: '10px' }}>Method Details:</h3>
+                <h3 style={{ color: '#6a1b9a', marginBottom: '10px' }}>Method Details:<HelpTip text={HELP.methodDetails} label="method details" /></h3>
                 <pre style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>{methodDetails}</pre>
                 {methodsTemplateText && (
                   <p style={{ marginTop: '12px', marginBottom: '12px', lineHeight: 1.6 }}>
@@ -1924,22 +2429,40 @@ function App() {
               </div>
 
             <div className="cluster-details">
-                <h3>Cluster Details:</h3>
+                <div className="cluster-details-header">
+                  <h3>
+                    Cluster Details ({sampling?.sampled
+                      ? `${sortedClusterData.length.toLocaleString()} of ${sampling.total.toLocaleString()} rows`
+                      : `${sortedClusterData.length} rows`})
+                    <HelpTip text={HELP.clusterDetails} label="cluster details" />
+                  </h3>
+                  <button
+                    type="button"
+                    className="details-toggle"
+                    onClick={() => setShowClusterDetails(show => !show)}
+                    aria-expanded={showClusterDetails}
+                  >
+                    {showClusterDetails ? 'Hide table ▲' : 'Show table ▼'}
+                  </button>
+                </div>
                 <button
                   onClick={handleDownloadTSV}
                   className="download-button" // Add a class for styling
                   disabled={!clusterData || clusterData.length === 0}
                 >
-                  Download TSV
+                  {sampling?.sampled ? `Download TSV (all ${sampling.total.toLocaleString()} rows)` : 'Download TSV'}
                 </button>
+                {showClusterDetails && (
                 <table>
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Cluster</th>
-                            <th>X</th>
-                            <th>Y</th>
-                            <th style={{width: '20px'}}>Color</th>
+                            {renderSortableHeader('name', 'Name')}
+                            {renderSortableHeader('cluster', 'Cluster')}
+                            {renderSortableHeader('x', 'X')}
+                            {renderSortableHeader('y', 'Y')}
+                            {hasMembership && renderSortableHeader('membership', 'Membership')}
+                            {hasRowStability && renderSortableHeader('stability', 'Stability')}
+                            {renderSortableHeader('color', 'Color', { width: '70px' })}
                         </tr>
                     </thead>
                     <tbody>
@@ -1949,11 +2472,14 @@ function App() {
                                 <td>{d.cluster === -1 ? 'Noise (-1)' : d.cluster}</td>
                                 <td>{d.x.toFixed(3)}</td>
                                 <td>{d.y.toFixed(3)}</td>
+                                {hasMembership && <td>{formatShare(d.membership)}</td>}
+                                {hasRowStability && <td>{formatShare(d.stability)}</td>}
                                 <td style={{ backgroundColor: d.color, border: '1px solid #ccc' }}></td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
+                )}
             </div>
           </section>
         )}

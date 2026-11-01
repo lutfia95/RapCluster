@@ -1,0 +1,1229 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[most]{tcolorbox}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\renewcommand{\arraystretch}{1.2}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+\definecolor{exframe}{RGB}{70,110,160}
+\definecolor{exback}{RGB}{244,247,251}
+\definecolor{noteframe}{RGB}{190,140,40}
+\definecolor{noteback}{RGB}{253,249,238}
+
+\newtcolorbox{example}[1][]{enhanced,breakable,colback=exback,colframe=exframe,
+  boxrule=0.6pt,arc=2pt,left=6pt,right=6pt,top=4pt,bottom=4pt,
+  fonttitle=\bfseries\small,title={Example\ifx&#1&\else: #1\fi}}
+\newtcolorbox{note}[1][Note]{enhanced,breakable,colback=noteback,colframe=noteframe,
+  boxrule=0.6pt,arc=2pt,left=6pt,right=6pt,top=4pt,bottom=4pt,
+  fonttitle=\bfseries\small,title={#1}}
+
+\lstset{basicstyle=\ttfamily\small,columns=fullflexible,keepspaces=true,
+  frame=single,rulecolor=\color{gray!50},backgroundcolor=\color{gray!5},
+  xleftmargin=4pt,xrightmargin=4pt,breaklines=true}
+
+\newcommand{\ui}[1]{\textsf{\textbf{#1}}}   % a label or button on the web page
+\newcommand{\param}[1]{\texttt{#1}}         % a parameter name
+
+\title{\textbf{RapCluster}\\[4pt]\large User guide with worked examples}
+\author{Rappsilber Lab, TU Berlin}
+\date{November 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent RapCluster is a web application for clustering tables of measurements, such as protein elution profiles,
+time courses or any other numeric data with one row per item. You upload a table, choose how the values are
+prepared, pick a clustering algorithm and look at the result from several sides: plots, cluster profiles, the
+features that separate the clusters, and how stable the clusters are. This guide goes through the page from top to
+bottom. Every section explains what a setting does and shows it on a small example, so you can check your
+understanding with pen and paper.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%=====================================================================
+\section{Overview}
+%=====================================================================
+
+A typical session looks like this:
+
+\begin{enumerate}
+  \item Upload a table, or load one of the example datasets.
+  \item Choose the preprocessing (how missing values are handled, whether to take a log, how to scale).
+  \item Optionally reduce the number of dimensions (PCA, UMAP or t-SNE).
+  \item Choose a clustering algorithm and its parameters.
+  \item Run, look at the results, try other settings, compare the runs and download what you need.
+\end{enumerate}
+
+Every run is stored in the session. You upload the data once and can then try as many settings as you like; the
+runs appear in \ui{Run History} and can be compared with each other. All data and runs are deleted when you close
+the page.
+
+Most labels on the page have a small \ui{?} next to them. Hover over it (or tap it, or reach it with the Tab key)
+to see a short explanation. This guide is the long version of those explanations.
+
+\subsection*{The running example}
+
+Many examples in this guide use the same small table: five proteins measured in four fractions of a separation.
+The numbers are intensities, and empty cells are missing values.
+
+\begin{center}
+\begin{tabular}{lrrrr}
+\toprule
+Name & F1 & F2 & F3 & F4\\
+\midrule
+ProtA & 10 & 50 & 100 & 20\\
+ProtB & 1 & 5 & 10 & 2\\
+ProtC & 100 & 20 & 10 & 50\\
+ProtD & 0 & 0 & 0 & 0\\
+ProtE & 40 & & & 30\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Look at ProtA and ProtB: both peak in F3, but ProtA is ten times more abundant. ProtC peaks in F1. ProtD has no
+signal at all, and ProtE is half empty. We will follow these five rows through the whole pipeline.
+
+%=====================================================================
+\section{Uploading data}
+%=====================================================================
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lL}
+\toprule
+Field & What it does\\
+\midrule
+\ui{Select File} & CSV, TSV, XLSX or XLS, up to 50\,MB. One row per item (protein, gene, sample, \dots), one
+  column per measurement.\\
+\ui{Or load example data} & Loads one of the bundled datasets and fills in the name column, the data start column
+  and suggested preprocessing.\\
+\ui{Sheet} & Excel only: the worksheet that holds the data.\\
+\ui{Name of Node Column} & The column that identifies each row. It labels points, tables and downloads, but it is
+  not used for clustering. If the column does not exist, rows are called \texttt{Node\_1}, \texttt{Node\_2},
+  \dots\\
+\ui{Data Start Column Index} & Position of the first numeric column, counting from 0. This column and every column
+  after it are clustered. Columns before it are ignored.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{example}[the data start column]
+Your file has these columns:
+
+\begin{center}
+\begin{tabular}{cccccc}
+\toprule
+0 & 1 & 2 & 3 & 4 & \dots\\
+\midrule
+Name & Gene & Class & F1 & F2 & \dots\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The measurements start at F1, which is position 3 (counting from 0), so you set the data start column index to
+\textbf{3} and the name column to \textbf{Name}. Gene and Class are kept in the file but not clustered. If you
+entered 2 by mistake, the text column Class would be read as data; every cell in it would become a missing value,
+and the Preflight Check would warn you about non-numeric values.
+\end{example}
+
+Numbers with a decimal comma (\texttt{1,5}) are accepted and read as \texttt{1.5}. Any cell in a data column that
+is not a number becomes a missing value.
+
+\subsection{Example datasets}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lrL}
+\toprule
+Example & Size & Useful for\\
+\midrule
+Protein profiles & $3000\times120$ & The original RapCluster use case: fractionation profiles.\\
+Time-course profiles & $1200\times24$ & Six expression patterns over time (rising, falling, late peak, \dots).\\
+Gaussian blobs & $600\times10$ & Five well-separated groups. A sanity check: almost every method should find them.\\
+Uneven density with noise & $700\times8$ & Groups of different density plus scattered noise. Made for DBSCAN,
+  HDBSCAN and OPTICS.\\
+Iris & $150\times4$ & The classic small dataset with three flower species.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Each example has a \texttt{Class} column with the true groups. It sits before the data start column, so it is not
+used for clustering, but you can compare your result against it.
+
+%=====================================================================
+\section{Preprocessing}
+\label{sec:preprocessing}
+%=====================================================================
+
+Raw measurements are rarely ready for clustering. Some cells are empty, a few very large values dominate everything
+else, and rows or columns are on different scales. Preprocessing deals with this. The steps always run in this
+order:
+
+\begin{enumerate}
+  \item Read the data columns as numbers.
+  \item Remove rows with too many missing values.
+  \item Fill the remaining missing values.
+  \item Transform the values (log or none).
+  \item Remove rows that are all zero.
+  \item Remove low-variance and highly correlated columns (both optional).
+  \item Scale the rows or the columns.
+\end{enumerate}
+
+The defaults reproduce the original RapCluster pipeline: keep every row, fill missing values with 0, take
+$\log_2(x+1)$, remove all-zero rows, and scale each row to a z-score. The settings are saved with every run, so a run
+can always be repeated exactly.
+
+\subsection{Remove rows with more than \dots\ \% missing values}
+
+For each row, RapCluster counts the share of its data columns that are empty (or not a number). If that share is
+\emph{above} the value you enter, the row is removed. Exactly the threshold is still allowed.
+
+\begin{example}[threshold 25\,\%]
+With four data columns, each missing cell is 25\,\%.
+
+\begin{center}
+\begin{tabular}{lccl}
+\toprule
+Row & Missing cells & Share & Result\\
+\midrule
+ProtA & 0 of 4 & 0\,\% & kept\\
+ProtD & 0 of 4 & 0\,\% & kept (zeros are values, not missing)\\
+ProtE & 2 of 4 & 50\,\% & \textbf{removed}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A row with one empty cell (25\,\%) would still be kept.
+\end{example}
+
+\begin{itemize}
+  \item \textbf{100} (the default) keeps every row.
+  \item \textbf{0} keeps only complete rows.
+  \item A row that is mostly empty ends up made mostly of filled-in values, and its cluster then says more about
+    the fill method than about the data. Values between 25 and 50\,\% are a common compromise.
+\end{itemize}
+
+\subsection{Fill remaining missing values with}
+
+The rows that survive the filter can still have empty cells. These are filled per column with one of:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lL}
+\toprule
+Option & Meaning\\
+\midrule
+0 (default) & Missing means ``not there''.\\
+Column minimum & The smallest observed value of that column. Missing means ``below the detection limit''.\\
+Half of the column minimum & As above, but a little lower than anything that was measured.\\
+Column median & A neutral middle value. It does not push the row up or down, but it can blur real differences.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{example}[one column, four ways]
+A column has the values 50, 5, 20 and one empty cell.
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Option & Filled value\\
+\midrule
+0 & 0\\
+Column minimum & 5\\
+Half of the column minimum & 2.5\\
+Column median & 20\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In proteomics a missing intensity usually means the protein was too low to be detected, not that it is absent, so
+the minimum or half the minimum is often more realistic than 0. Note that zeros count as observed values: if a
+column contains a 0, its minimum is 0, and ``column minimum'' then gives the same result as ``0''.
+\end{example}
+
+A column without any observed value is filled with 0, and the Preflight Check lists it.
+
+\subsection{Transformation}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lL}
+\toprule
+Option & Formula and use\\
+\midrule
+$\log_2(x+1)$ (default) & Compresses large values. The $+1$ keeps 0 at 0.\\
+$\log_{10}(x+1)$ & The same with base 10. The shape is identical; only the numbers are smaller.\\
+Signed log & $\operatorname{sign}(x)\cdot\log_2(|x|+1)$. For data with negative values, such as log ratios or
+  differences.\\
+None & The values are used as they are.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Intensities often span several orders of magnitude. Without a log, one protein with an intensity of 1{,}000{,}000
+outweighs everything else, and the clustering is mostly about which proteins are abundant. After the log, a step
+from 10 to 100 counts about as much as a step from 1{,}000 to 10{,}000.
+
+\begin{example}[what the log does]
+\begin{center}
+\begin{tabular}{lrrrrr}
+\toprule
+$x$ & 0 & 1 & 3 & 7 & 1023\\
+$\log_2(x+1)$ & 0 & 1 & 2 & 3 & 10\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A value 1000 times larger becomes only about 10 units larger. For negative data the signed log keeps the sign:
+$-8$ becomes $-3.17$ and $+8$ becomes $+3.17$.
+\end{example}
+
+$\log(x+1)$ is not defined for values of $-1$ or less. If your data has such values, RapCluster stops with a
+message and asks you to choose the signed log or no transformation. The Preflight Check finds these values before
+you run.
+
+\subsection{Remove all-zero rows}
+
+On by default. A row in which every value is 0 after filling has no profile: it cannot be scaled (all its values are
+equal) and it would form a meaningless cluster of its own.
+
+\begin{example}
+ProtD is 0 in every fraction and is removed. A row that was \emph{completely empty} also ends up here when missing
+values are filled with 0: after filling it is all zeros, so it is removed too.
+\end{example}
+
+\subsection{Remove low-variance columns}
+
+Optional. A column is removed when its standard deviation (after the transformation) is at or below the threshold.
+With the threshold at 0, only constant columns are removed.
+
+\begin{example}
+A fraction in which every protein has the value 5 has a standard deviation of 0. It carries no information that
+could separate rows, so it is removed. With a threshold of 0.1, a column whose values vary only between 4.98 and 5.02
+would be removed as well.
+\end{example}
+
+\subsection{Remove highly correlated columns}
+
+Optional, threshold 0.95 by default (allowed: 0.5 to 1). The columns are checked from left to right. A column is
+removed when its correlation with an earlier column that was kept is above the threshold (in absolute value). The
+earlier column always stays.
+
+\begin{example}
+Three columns over four rows:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+& C1 & C2 & C3\\
+\midrule
+Row 1 & 1 & 2 & 5\\
+Row 2 & 2 & 4 & 3\\
+Row 3 & 3 & 6 & 4\\
+Row 4 & 4 & 8 & 1\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+C2 is exactly twice C1, so their correlation is 1.00 and C2 is removed (``correlated with C1''). C3 has a
+correlation of $-0.83$ with C1, which is below 0.95 in absolute value, so it stays.
+\end{example}
+
+\begin{note}
+Do not use this filter for profile data. Neighbouring fractions or time points are naturally correlated, and the
+filter would throw away much of the profile. It is meant for tables whose columns are different measurements, some
+of which repeat each other.
+\end{note}
+
+\subsection{Scaling}
+
+Clustering groups rows by how close their values are. Without scaling, whatever has the largest numbers dominates
+those distances. Scaling makes the values comparable. The main choice is whether to scale each \emph{row} or each
+\emph{column}.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lL}
+\toprule
+Option & What it does\\
+\midrule
+Per-row z-score (default) & Each row gets mean 0 and standard deviation 1: $z = (x-\text{mean})/\text{sd}$.\\
+Per-row min--max & Each row's smallest value becomes 0 and its largest becomes 1.\\
+Per-column z-score & Each column gets mean 0 and standard deviation 1.\\
+Per-column robust & Like the z-score, but with the median and the interquartile range, so outliers have less
+  influence.\\
+Per-column min--max & Each column is squeezed to the range 0 to 1. One extreme value can squash all the others.\\
+None & The transformed values are clustered directly.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\paragraph{Per-row scaling compares the shape of each row.}
+It ignores the overall level, so it suits ordered measurements of the same quantity: fractions, time points, a
+gradient.
+
+\begin{example}[per-row scaling]
+ProtA, ProtB and ProtC after $\log_2(x+1)$, then scaled per row:
+
+\begin{center}
+\begin{tabular}{l rrrr c rrrr}
+\toprule
+& \multicolumn{4}{c}{after $\log_2(x+1)$} && \multicolumn{4}{c}{per-row z-score}\\
+\cmidrule{2-5}\cmidrule{7-10}
+& F1 & F2 & F3 & F4 && F1 & F2 & F3 & F4\\
+\midrule
+ProtA & 3.46 & 5.67 & 6.66 & 4.39 && $-1.30$ & 0.51 & 1.32 & $-0.54$\\
+ProtB & 1.00 & 2.58 & 3.46 & 1.58 && $-1.23$ & 0.45 & 1.38 & $-0.61$\\
+ProtC & 6.66 & 4.39 & 3.46 & 5.67 && 1.32 & $-0.54$ & $-1.30$ & 0.51\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Before scaling, ProtA is closer to ProtC than to ProtB, simply because both have large numbers. After scaling,
+ProtA and ProtB are almost identical (same peak in F3) and end up in the same cluster, while ProtC (peak in F1) is
+far away. That is usually what you want for profiles.
+
+With per-row min--max the picture is the same: ProtA becomes $0,\ 0.69,\ 1,\ 0.29$ and ProtB
+$0,\ 0.64,\ 1,\ 0.24$.
+\end{example}
+
+\paragraph{Per-column scaling puts different measurements on the same scale.}
+Use it when the columns measure different things.
+
+\begin{example}[per-column scaling, iris]
+In the iris data, sepal length lies between about 4 and 8\,cm, petal width between 0.1 and 2.5\,cm. Without scaling,
+a difference of 1\,cm counts the same in both columns, although 1\,cm is a small step for sepal length and a huge
+one for petal width. After a per-column z-score, every column has mean 0 and standard deviation 1, and each
+measurement counts equally. Per-row scaling would make no sense here: it would compare sepal length with petal
+width inside one flower.
+\end{example}
+
+\textbf{Rule of thumb:} same kind of measurement in every column and you care about the pattern (proteomics
+profiles, time courses): per row. Columns are different kinds of measurement: per column.
+
+The Preflight Check helps here. It warns when you scale per row with fewer than 3 columns (almost nothing is left of
+the data), gives a hint with 10 columns or fewer, and warns when you use no scaling while the column spreads differ
+by more than a factor of 100.
+
+\subsection{The running example after all steps}
+
+With the default settings (keep all rows, fill with 0, $\log_2(x+1)$, remove all-zero rows, per-row z-score):
+
+\begin{center}
+\begin{tabular}{l rrrr l}
+\toprule
+& F1 & F2 & F3 & F4 & What happened\\
+\midrule
+ProtA & $-1.30$ & 0.51 & 1.32 & $-0.54$ & \\
+ProtB & $-1.23$ & 0.45 & 1.38 & $-0.61$ & same shape as ProtA\\
+ProtC & 1.32 & $-0.54$ & $-1.30$ & 0.51 & mirror image of ProtA\\
+ProtD & \multicolumn{4}{c}{removed} & all zero\\
+ProtE & 1.08 & $-1.00$ & $-1.00$ & 0.92 & two cells filled with 0\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Notice ProtE. Its two missing cells became 0, so after scaling it looks like a protein with a clear dip in F2 and
+F3. That dip comes only from the fill value. With the missing filter at 25\,\%, ProtE would have been removed
+instead. This is exactly the kind of decision preprocessing is about.
+
+%=====================================================================
+\section{Exploring the data before clustering}
+%=====================================================================
+
+\ui{Explore data with these settings} shows the data after your preprocessing, without clustering. It is the place
+to check whether the settings do what you expect. The panel has five tabs.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lL}
+\toprule
+Tab & What it shows\\
+\midrule
+Missing values & How many rows have no, few or many missing values (none, $\le$10\,\%, 10--25\,\%, \dots), and the
+  missing share per column.\\
+PCA variance & How much of the variation the first principal components explain. If two components explain 90\,\%,
+  a 2D plot shows most of the structure. If they explain 20\,\%, it hides most of it.\\
+Distributions & One box plot per column, before and after scaling.\\
+Correlation & A heatmap of the correlations between the columns (up to 150 columns).\\
+Outliers & The rows that lie furthest from the typical row.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{note}
+In the Distributions tab, ``before scaling'' is not the raw data. Missing values are already filled and the
+transformation is already applied; only the scaling is left out. The tab therefore shows what the scaling step does.
+\end{note}
+
+\subsection{How outliers are found}
+
+\begin{enumerate}
+  \item RapCluster builds the \emph{median profile}: for each column, the median over all rows. This is the
+    ``typical row''.
+  \item For each row it measures the Euclidean distance to this median profile.
+  \item It turns the distances into \emph{robust z-scores}:
+    \[
+      z = \frac{d - \operatorname{median}(d)}{1.4826\cdot\operatorname{MAD}(d)},
+    \]
+    where MAD is the median absolute deviation. The factor 1.4826 makes the MAD comparable to a standard
+    deviation for normally distributed data.
+  \item The 25 rows with the largest $z$ are listed, together with a histogram of all distances.
+\end{enumerate}
+
+\begin{example}[robust z-score]
+Seven rows have these distances to the median profile:
+\[
+  1.0,\ 1.1,\ 1.2,\ 0.9,\ 1.0,\ 0.8,\ 5.0
+\]
+The median distance is 1.0. The absolute deviations from it are $0, 0.1, 0.2, 0.1, 0, 0.2, 4.0$, with median
+$0.1$, so the scaled MAD is $1.4826\times0.1=0.148$. The last row gets
+\[
+  z = \frac{5.0-1.0}{0.148} \approx 27,
+\]
+while all others lie between $-1.35$ and $1.35$. A robust z-score above about 3.5 is unusual and worth a look.
+
+Why not the ordinary mean and standard deviation? The outlier itself would raise both, and its z-score would only
+be about 2.4. Medians are hardly affected by a single extreme value.
+\end{example}
+
+The outliers depend on your settings. With per-row scaling, an outlier is a row with an unusual \emph{shape}, not
+one that is merely very high or low. To find rows with extreme values, look with per-column scaling or none.
+RapCluster never removes outliers on its own. If a row looks like an error, remove it from your file and upload
+again.
+
+%=====================================================================
+\section{Dimensionality reduction}
+%=====================================================================
+
+Optional. A reduction maps the data to fewer dimensions before clustering. Two things are important:
+
+\begin{itemize}
+  \item The clustering uses \textbf{all} chosen dimensions (\param{n\_components}). The plots show the first two.
+  \item With \textbf{None}, the clustering uses all preprocessed columns. The scatter plot then shows a PCA
+    projection, for display only.
+\end{itemize}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lLL}
+\toprule
+Method & Idea & Main parameters (default)\\
+\midrule
+None & Cluster on all features. & --\\
+PCA & Linear projection onto the directions of largest variance. Fast and deterministic. &
+  \param{n\_components} (2), \param{svd\_solver} (auto)\\
+UMAP & Non-linear. Keeps neighbours together and much of the global layout. Good input for density-based
+  clustering. & \param{n\_components} (2), \param{n\_neighbors} (15), \param{min\_dist} (0.1), \param{metric}
+  (euclidean)\\
+t-SNE & Non-linear. Keeps close neighbours together and gives clearly separated groups, but sizes and distances in
+  the plot mean little. 2 or 3 dimensions, slow on large data. & \param{perplexity} (30), \param{learning\_rate}
+  (200), \param{n\_iter} (1000)\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+All three have a \param{random\_state} (default 42). The same seed gives the same result.
+
+\begin{example}[when to reduce]
+The protein profiles example has 120 fractions. Clustering on all 120 is fine for KMeans, but density-based methods
+such as HDBSCAN struggle in many dimensions, because in high dimensions all distances look alike. A common approach
+is UMAP to 5--10 dimensions, then HDBSCAN on those. With \param{n\_neighbors} = 5, UMAP focuses on very local
+structure and may split real groups; with 100 it looks at the big picture and may merge small groups.
+
+For iris, with only 4 columns, a reduction is not needed: cluster on all columns and use the plot only for display.
+\end{example}
+
+\begin{note}
+Do not cluster on a t-SNE result unless you know why. t-SNE exaggerates gaps between groups and does not keep
+distances, so clusters found in a t-SNE map can be artefacts of the map. Use it to look at the data; use PCA or UMAP
+as input for clustering.
+\end{note}
+
+%=====================================================================
+\section{Clustering algorithms}
+%=====================================================================
+
+RapCluster offers 13 algorithms. They differ in what they assume a cluster is: a round group around a centre, a
+dense region, a branch of a tree, or a component of a probability mixture. No algorithm is best for all data.
+
+With \ui{Use Default Parameters} ticked, the algorithm runs with the defaults listed below. Untick it to change
+single parameters. Each parameter has a \ui{?} with its meaning, default and allowed range, and \ui{Learn More} opens
+a longer guide.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{lLcL}
+\toprule
+Algorithm & Idea & Noise & You mainly set\\
+\midrule
+KMeans & Rows close to the mean of their group & no & \param{n\_clusters}\\
+MiniBatchKMeans & KMeans on small random batches; for large data & no & \param{n\_clusters}\\
+BisectingKMeans & Start with one cluster, keep splitting one in two & no & \param{n\_clusters}\\
+Agglomerative & Merge the closest clusters step by step & no & \param{n\_clusters}, \param{linkage}\\
+BIRCH & Compress the data into a tree of subclusters; for large data & no & \param{threshold},
+  \param{n\_clusters}\\
+Spectral & Cluster a similarity graph; finds curved shapes & no & \param{n\_clusters}, \param{affinity}\\
+GaussianMixture & Mixture of Gaussian distributions & no & \param{n\_components}\\
+BayesianGaussianMixture & Mixture that leaves unneeded components empty & no & maximum \param{n\_components}\\
+DBSCAN & Connected dense regions & yes & \param{eps}, \param{min\_samples}\\
+HDBSCAN & DBSCAN over all density levels & yes & \param{min\_cluster\_size}\\
+OPTICS & Density ordering, cut at steep changes & yes & \param{xi}, \param{min\_samples}\\
+MeanShift & Every density peak is a cluster & optional & \param{bandwidth}\\
+AffinityPropagation & Rows elect exemplars; small data only & no & \param{preference}\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{Noise.} Density-based algorithms do not force every row into a cluster. Rows in sparse regions get the
+label $-1$ (``noise'') and are shown in grey. Noise is not a cluster: it is left out of the cluster count and the
+quality metrics.
+
+\subsection{Centre-based: KMeans, MiniBatchKMeans, BisectingKMeans}
+
+KMeans places \param{n\_clusters} centres (default 8) and assigns every row to the nearest one. It then moves each
+centre to the mean of its rows and repeats until nothing changes. It works best for round clusters of similar size,
+and you have to know (or try) the number of clusters.
+
+\begin{itemize}
+  \item \textbf{MiniBatchKMeans} updates the centres from small random batches instead of all rows. It is much
+    faster on large data and slightly less exact.
+  \item \textbf{BisectingKMeans} starts with all rows in one cluster and splits a cluster in two (with 2-means)
+    until there are \param{n\_clusters}. With \param{bisecting\_strategy} = \texttt{biggest\_inertia} (default) it
+    splits the cluster with the largest spread, with \texttt{largest\_cluster} the one with the most rows.
+\end{itemize}
+
+\begin{example}
+Load \emph{Gaussian blobs}, keep the defaults for preprocessing except scaling (per-column z-score) and run KMeans
+with \param{n\_clusters} = 5. It finds the five blobs almost perfectly. With \param{n\_clusters} = 8 (the default)
+it still runs, but splits some blobs into pieces: KMeans always returns exactly the number you ask for.
+\end{example}
+
+\subsection{Hierarchical: AgglomerativeClustering and BIRCH}
+
+Agglomerative clustering starts with every row as its own cluster and merges the two closest clusters, again and
+again, until \param{n\_clusters} are left (default 8). ``Closest'' depends on the \param{linkage}:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lL}
+\toprule
+Linkage & Distance between two clusters\\
+\midrule
+ward (default) & The merge that increases the within-cluster spread the least. Gives compact clusters. Needs the
+  euclidean metric.\\
+complete & The largest distance between any two of their rows.\\
+average & The average distance between their rows.\\
+single & The smallest distance. Can follow long chains, which is useful for elongated shapes but often produces one
+  huge cluster.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{BIRCH} reads the data once and builds a compact tree of small subclusters, each covering rows within
+\param{threshold} (default 0.5) of each other. Those subclusters are then grouped into \param{n\_clusters}. With
+\param{n\_clusters} set to None, the subclusters themselves are the result. BIRCH is one of the two methods (with
+MiniBatchKMeans) suited to very large data.
+
+\subsection{SpectralClustering}
+
+Builds a graph in which each row is connected to its \param{n\_neighbors} nearest rows (default 10, affinity
+\texttt{nearest\_neighbors}) and splits this graph into \param{n\_clusters} well-connected parts. Because it follows
+the graph, it can find curved or ring-shaped clusters that KMeans cannot. The affinity \texttt{rbf} uses a full
+$n\times n$ similarity matrix and needs a lot of memory.
+
+\subsection{Mixture models: GaussianMixture and BayesianGaussianMixture}
+
+A Gaussian mixture assumes the data was generated by \param{n\_components} Gaussian distributions (default 8) and
+estimates their means, shapes and weights. Every row gets a \emph{probability} for each component and is assigned
+to the most likely one. That probability is shown as the row's membership.
+
+\param{covariance\_type} sets the shape of each component:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+full (default) & every component has its own shape and orientation\\
+tied & all components share one shape\\
+diag & axis-parallel ellipses\\
+spherical & round, like KMeans\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{BayesianGaussianMixture} takes \param{n\_components} (default 10) only as a \emph{maximum}. It works out how
+many components it needs and gives the others almost no weight. The result reports how many components were used.
+A smaller \param{weight\_concentration\_prior} favours fewer components; empty (None) means $1/n_\text{components}$.
+
+\begin{example}
+The time-course example has six true patterns in 24 time points. With the defaults (maximum 10, full
+covariance), BayesianGaussianMixture uses all 10 components and splits some patterns (ARI 0.81 against the true
+classes). The reason is the full covariance: each component has its own $24\times24$ covariance matrix, and with
+1{,}200 rows the model can afford to fit small, oddly shaped components. With \param{covariance\_type} =
+\texttt{diag} it uses exactly 6 components and recovers the six patterns perfectly (ARI 1.00). If a run reports
+that it used every allowed component, try a simpler covariance type or a larger maximum.
+
+To choose $n$ for GaussianMixture, run a parameter sweep over \param{n\_components} and look for the lowest BIC.
+\end{example}
+
+\subsection{Density-based: DBSCAN, HDBSCAN, OPTICS}
+
+These algorithms define a cluster as a dense region and call rows in sparse regions noise. You do not set the number
+of clusters.
+
+\textbf{DBSCAN.} A row is a \emph{core} row if at least \param{min\_samples} rows (default 5, counting itself) lie
+within distance \param{eps} (default 0.5). Core rows that are within \param{eps} of each other form one cluster, and
+rows near a core row join it. Everything else is noise.
+
+\begin{example}[the effect of eps]
+On the \emph{uneven density with noise} example: with a very small \param{eps}, almost every row is noise. With a
+very large one, all groups merge into one cluster. Somewhere in between DBSCAN finds the groups, but because one
+\param{eps} has to fit all of them, it often finds the dense groups and loses the sparse ones to noise, or the
+other way round. The right \param{eps} depends on the scale of the data after preprocessing and reduction, so a value
+that works with z-scores will not work with raw intensities.
+\end{example}
+
+\textbf{HDBSCAN} runs DBSCAN for all values of \param{eps} at once and keeps the clusters that persist longest. It
+handles clusters of different density. Its main parameter is \param{min\_cluster\_size}, the smallest group that
+counts as a cluster. The defaults on the form are \param{min\_cluster\_size} = 2, \param{min\_samples} = 15 and
+\param{max\_cluster\_size} = 20 (empty means no limit); \param{cluster\_selection\_method} \texttt{eom} prefers a
+few large clusters, \texttt{leaf} many small ones. HDBSCAN also gives a membership probability per row and a
+\emph{persistence} per cluster (how long the cluster survived; higher is more convincing).
+
+\textbf{OPTICS} orders the rows by density and cuts clusters where the density changes steeply. \param{xi} (default
+0.05) sets how steep a change must be; \param{min\_cluster\_size} (default 0.05) is a share of all rows, so 0.05
+means at least 5\,\% of the rows.
+
+\subsection{MeanShift}
+
+Moves a window of radius \param{bandwidth} (default 1.0) uphill towards the densest point, starting from many seeds.
+Every density peak it reaches becomes a cluster. With \param{cluster\_all} on (default), every row is assigned to
+the nearest peak; with it off, rows far from every peak become noise. A small bandwidth gives many small clusters, a
+large one few big clusters.
+
+\subsection{AffinityPropagation}
+
+Rows exchange messages until some of them are elected as \emph{exemplars}, and every row joins its exemplar. The
+number of clusters follows from \param{preference} (default $-50$): a lower (more negative) value gives fewer
+clusters. \param{damping} (0.5 to 1) slows the updates down when the method does not converge. Time and memory grow
+with the square of the number of rows, so it is only practical for a few thousand rows.
+
+%=====================================================================
+\section{Checking and running}
+%=====================================================================
+
+\subsection{Preflight Check}
+
+\ui{Check data \& settings} inspects the data and the chosen methods without clustering and opens the
+\ui{Preflight Check} panel. \ui{Run Clustering} runs the same check first.
+
+\textbf{Data checks.} Rows and columns used, missing and non-numeric values, values that the log cannot handle
+($\le -1$), constant columns, all-zero rows, rows with many missing values, strongly correlated columns, duplicate
+rows, duplicate names, whether the name column exists, the scaling advice described above, the upload size and the
+estimated size of the result.
+
+\textbf{Capacity guidance.} Every algorithm, reduction method and metric is rated for the number of rows used:
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Algorithm & Recommended up to & May be slow up to\\
+\midrule
+MiniBatchKMeans, BIRCH & 200{,}000 & 1{,}000{,}000\\
+KMeans, BisectingKMeans & 100{,}000 & 500{,}000\\
+GaussianMixture & 50{,}000 & 200{,}000\\
+BayesianGaussianMixture & 20{,}000 & 100{,}000\\
+DBSCAN, HDBSCAN & 20{,}000 & 100{,}000\\
+AgglomerativeClustering & 10{,}000 & 30{,}000\\
+OPTICS & 5{,}000 & 30{,}000\\
+MeanShift, SpectralClustering & 5{,}000 & 20{,}000\\
+SpectralClustering with rbf & 2{,}000 & 8{,}000\\
+AffinityPropagation & 2{,}000 & 5{,}000\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Above the second number the rating is \emph{Not recommended on the hosted server}. Gaussian mixtures with full
+covariance on more than 50 dimensions are rated one level worse. For AffinityPropagation and SpectralClustering with
+rbf, the panel also estimates the memory of the $n\times n$ matrices: $n^2\times 8$ bytes per matrix (three for
+AffinityPropagation, one for rbf).
+
+\begin{example}[a dataset with 12{,}000 rows]
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+KMeans & Recommended (12{,}000 $\le$ 100{,}000)\\
+HDBSCAN & Recommended (12{,}000 $\le$ 20{,}000)\\
+AgglomerativeClustering & May be slow (between 10{,}000 and 30{,}000)\\
+AffinityPropagation & Not recommended (above 5{,}000)\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For AffinityPropagation the memory estimate is $3\times12{,}000^2\times8$ bytes $\approx$ 3{,}300\,MB, close to the
+4\,GB limit of a run.
+\end{example}
+
+\begin{note}[How reliable are these numbers?]
+The limits are estimates, chosen from how each algorithm scales with the number of rows (linear, faster than linear,
+quadratic) and rounded to fit the server's limits of 10 minutes and 4\,GB per run. They were not measured on the
+server, and apart from the memory estimate they ignore the number of columns and the parameter values (DBSCAN with a
+very large \param{eps}, for example, can be much slower). Treat them as a guide.
+\end{note}
+
+\subsection{Running}
+
+The ratings are recommendations, not rules. If everything is \emph{Recommended}, the run starts at once. Otherwise
+the panel asks first, with a \ui{Run anyway} and a \ui{Cancel} button. The same happens when the data has problems
+that will likely make the run fail. \ui{Close} hides the panel.
+
+A run is a background job with a progress bar showing the current stage, and it can be cancelled. What actually
+stops a run are the limits of the server: 50\,MB per upload, 10 minutes and 4\,GB per run, and at most 3 runs at the
+same time. A run that hits a limit is stopped with a message that says which limit was reached and what to change,
+for example ``Use a faster algorithm, reduce the dimensions with PCA or UMAP, or use a smaller dataset.''
+
+%=====================================================================
+\section{Results}
+%=====================================================================
+
+\subsection{Metrics}
+
+Clustering has no ground truth, so the metrics measure how well separated and compact the clusters are. They are
+useful for comparing runs on the \emph{same} data, not as absolute grades. Noise rows are left out.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lLc}
+\toprule
+Metric & Meaning & Better\\
+\midrule
+Clusters found & Number of clusters, without noise. & --\\
+Silhouette & How much closer rows are to their own cluster than to the next one, from $-1$ to 1. Computed on up to
+  5{,}000 rows. & higher\\
+Calinski--Harabasz & Spread between clusters relative to spread within them. No fixed scale. & higher\\
+Davies--Bouldin & How similar each cluster is to its most similar neighbour. 0 is best. & lower\\
+DBCV & Density-based validation, from $-1$ to 1. Fair to clusters that are not round. & higher\\
+BIC / AIC & Fit of a mixture model with a penalty for complexity (GaussianMixture). & lower\\
+Mean membership & Average probability with which rows belong to their cluster (HDBSCAN, mixtures). & higher\\
+Components used & Components that received rows (BayesianGaussianMixture). & --\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{example}[silhouette of one row]
+A row has an average distance of $a = 1.0$ to the other rows of its cluster and $b = 3.0$ to the rows of the
+nearest other cluster. Its silhouette is
+\[
+  s = \frac{b-a}{\max(a,b)} = \frac{3.0-1.0}{3.0} = 0.67 .
+\]
+A value near 1 means the row clearly belongs where it is, near 0 that it sits between two clusters, and a negative
+value that it is closer to another cluster. The silhouette score of a run is the average over all rows. As a rough
+guide, above 0.5 is a clear structure and below 0.25 a weak one.
+\end{example}
+
+\begin{note}
+The silhouette and Calinski--Harabasz favour round, compact clusters. A density-based run that finds two
+half-moons correctly can score worse than a KMeans run that cuts them in half. For density-based results, look at
+DBCV.
+\end{note}
+
+\subsection{Visualization tabs}
+
+\begin{description}[style=nextline,leftmargin=1.5em]
+  \item[Scatter Plot] Every row as a point, coloured by cluster. Hover for the name, drag to zoom. For large data
+    the plots show a sample of up to 5{,}000 rows that includes every cluster; sizes, tables and downloads always
+    use all rows. A caption template below the plot describes the settings for a figure legend.
+  \item[Clusters Network] One node per cluster, placed at its centre. Edges are thicker and darker the closer two
+    clusters are. Click a cluster to open its sub-network.
+  \item[Sub-network View] The rows of one cluster, each connected to its nearest neighbours (3 to 20). Draw a lasso
+    around points to plot their raw profiles (as $\log_{10}$ of the filled values).
+  \item[Heatmap] The preprocessed values as colours, either one summary row per cluster (median or mean) or the rows
+    of one cluster (up to 1{,}000). The optional dendrogram only orders the rows; it is not another clustering.
+  \item[Characterization] What makes each cluster special (Section~\ref{sec:characterization}).
+  \item[Stability] Whether the clusters come back when the data changes a little (Section~\ref{sec:stability}).
+\end{description}
+
+\subsection{Method Details and Cluster Details}
+
+\ui{Method Details} summarises all settings of the run and gives a methods paragraph you can adapt for a paper.
+\ui{Cluster Details} is a table with one line per data row: name, cluster, plot coordinates, colour and, when
+available, the membership probability and the row stability. Click a column header to sort.
+
+%=====================================================================
+\section{Characterization}
+\label{sec:characterization}
+%=====================================================================
+
+The Characterization tab describes each cluster. It is computed on all rows and on the preprocessed values, the same
+values the clustering used (before any reduction).
+
+\subsection{Cluster summary}
+
+For each cluster: its size and share of all rows, the \emph{medoid} (the member with the smallest total distance to
+the other members, i.e.\ the most typical one), the five members closest to the medoid (the medoid itself first), and its most distinguishing
+features. Member lists can be copied or downloaded, one name per line, for tools such as g:Profiler or STRING.
+
+\subsection{Cluster profiles: median with interquartile range}
+
+For each selected cluster, the figure shows its typical profile across the data columns (the line, the median of its
+members) and, as a shaded band, where the middle half of its members lie (the interquartile range, 25th to 75th
+percentile). The five largest clusters are shown first; tick others to add them.
+
+\begin{example}
+A cluster has eight proteins with these values in fraction F3:
+\[
+  0.2,\ 0.9,\ 1.1,\ 1.2,\ 1.3,\ 1.4,\ 1.6,\ 3.0
+\]
+The median is 1.25 and the band runs from 1.05 (25th percentile) to 1.45 (75th percentile). The two extreme values
+0.2 and 3.0 hardly move these numbers; a mean with standard deviation would be pulled by both.
+\end{example}
+
+A narrow band means the members have very similar profiles. A wide band means they differ a lot in that column.
+Clusters whose lines and bands overlap look alike in those columns.
+
+\subsection{Features that distinguish a cluster}
+
+For the selected cluster, this figure shows the 15 columns (features) in which its members differ most from all
+other rows, measured with \emph{Cliff's $\delta$}. Red bars mean higher in the cluster, blue bars lower. The table
+next to it gives the median in the cluster and the median of the rest; click a feature to see its box plots.
+
+Cliff's $\delta$ takes every pair of one value from the cluster and one from the rest and asks which is bigger:
+\[
+  \delta = P(\text{cluster value} > \text{rest value}) - P(\text{cluster value} < \text{rest value}).
+\]
+$+1$ means every value in the cluster is higher, $-1$ every value lower, 0 no difference. $|\delta|$ above about
+0.47 is usually called a large effect (about 0.33 medium, 0.15 small). It uses only the order of the values, so it
+does not depend on units and outliers hardly affect it.
+
+\begin{example}[Cliff's $\delta$ by hand]
+In one column, the cluster has the values $3, 4, 5$ and the rest has $1, 2, 3$. There are $3\times3=9$ pairs:
+
+\begin{itemize}
+  \item 3 against 1, 2, 3: bigger, bigger, tie
+  \item 4 against 1, 2, 3: bigger three times
+  \item 5 against 1, 2, 3: bigger three times
+\end{itemize}
+
+That is 8 pairs bigger, 0 smaller and 1 tie, so $\delta = 8/9 - 0/9 = 0.89$: a large effect, the cluster is clearly
+higher in this column.
+\end{example}
+
+\subsection{Feature distribution by cluster}
+
+For one chosen column, a box plot of its values in every cluster side by side. The box covers the middle 50\,\% of
+the cluster's rows, the solid line is the median, the dashed line the mean, and the whiskers reach the most extreme
+values within $1.5\times$ the interquartile range. It shows the same numbers as the profiles, seen from the other
+side: one column across all clusters instead of all columns for a few clusters.
+
+\subsection{Differences between clusters per feature (Kruskal--Wallis)}
+
+For every column, a Kruskal--Wallis test compares its values across all clusters at once (noise excluded). It is
+the rank-based version of a one-way ANOVA and does not assume normal data. The table is sorted by the effect size
+\[
+  \varepsilon^2 = \frac{H}{n-1},
+\]
+from 0 to 1 (roughly 0.01 small, 0.08 medium, 0.26 and above large). It also shows the test statistic $H$, the
+p-value and the q-value (the p-value adjusted for testing many columns, Benjamini--Hochberg).
+
+\begin{example}
+Three clusters of four rows each have these values in one column:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Cluster 0 & 1.0, 1.2, 0.9, 1.1\\
+Cluster 1 & 2.0, 2.2, 1.9, 2.1\\
+Cluster 2 & 1.0, 1.1, 1.3, 0.8\\
+\bottomrule
+\end{tabular}
+\end{center}
+Cluster 1 is clearly higher. The test gives $H = 7.44$ with $n = 12$ rows, so $\varepsilon^2 = 7.44/11 = 0.68$,
+a large effect, and $p = 0.024$.
+\end{example}
+
+\begin{note}[Descriptive only]
+The clusters were built so that their values differ. Small p-values are therefore expected and are not proof of a
+real difference; testing on the same data that formed the groups is circular. Use $\varepsilon^2$ to rank the
+features and do not draw conclusions from the p-values. For real evidence, test the clusters on independent data or
+check them with the stability analysis.
+\end{note}
+
+Cliff's $\delta$ and Kruskal--Wallis answer different questions. Cliff's $\delta$ compares \emph{one} cluster
+with the rest and has a direction (``what makes cluster 3 special?''). Kruskal--Wallis looks at all clusters at once
+without a direction (``which features separate the clusters at all?'').
+
+\subsection{Outliers and noise}
+
+Rows that lie far from their own cluster's median profile, as a robust z-score within the cluster (computed as in
+the exploratory outlier check, but per cluster), and the list of noise rows. For HDBSCAN and the mixture models,
+extra columns show the mean membership, the cluster persistence or the mixture weights.
+
+%=====================================================================
+\section{Stability}
+\label{sec:stability}
+%=====================================================================
+
+A clustering algorithm always returns clusters, even for random data. The stability analysis checks whether yours
+are real: it repeats the clustering on slightly changed data and looks whether the same clusters come back.
+
+\textbf{What is repeated.} 10 random subsamples of 80\,\% of the rows (adjustable from 3 to 30), and for algorithms
+with a random seed, 5 runs on all rows with other seeds (0 to 10). All settings stay the same. Each repeated
+solution is compared with your run on the rows they share.
+
+\subsection{Cluster stability (Jaccard)}
+
+For each cluster, RapCluster finds the best-matching cluster in every repeated solution and measures their overlap:
+\[
+  J = \frac{\text{rows in both}}{\text{rows in either}}.
+\]
+The average over all repeats gives the verdict: \textbf{stable} ($\ge 0.75$), \textbf{doubtful} (0.6 to 0.75) or
+\textbf{unstable} ($< 0.6$).
+
+\begin{example}
+Cluster 2 contains the rows 1 to 10. In one repeat, its best match contains rows 1 to 8 plus rows 11 and 12. They
+share 8 rows, and 12 different rows appear in either one, so $J = 8/12 = 0.67$. If the average over all repeats is
+also around 0.67, cluster 2 is rated doubtful: its core comes back, but its edges keep changing.
+\end{example}
+
+\subsection{Agreement between solutions (ARI and NMI)}
+
+These compare whole clusterings. The \emph{adjusted Rand index} (ARI) looks at every pair of rows and asks whether
+both clusterings put them together or apart, corrected for chance: 1 means identical, about 0 means no better than
+random. The \emph{normalized mutual information} (NMI) measures how much one clustering tells about the other, from
+0 to 1. Both are shown for each repeat against your run and for the repeats against each other. A high, narrow box
+plot means the result is reliable; a wide one means it depends on chance.
+
+\begin{example}[cluster numbers do not matter]
+Nine rows, two clusterings:
+\begin{center}
+\begin{tabular}{lccccccccc}
+\toprule
+Row & 1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9\\
+\midrule
+Run & 0 & 0 & 0 & 1 & 1 & 1 & 2 & 2 & 2\\
+Repeat & 1 & 1 & 1 & 0 & 0 & 0 & 2 & 2 & 0\\
+\bottomrule
+\end{tabular}
+\end{center}
+The first six rows are grouped identically; only the numbers 0 and 1 are swapped, which does not count. Row 9 has
+moved to another cluster. The ARI is 0.64 and the NMI 0.79. Without the move of row 9 the ARI would be exactly 1.
+\end{example}
+
+\subsection{Row stability and consensus}
+
+For every row, the share of the repeats in which it stays in its (matched) cluster. A row that keeps its cluster in
+12 of 15 repeats has a row stability of 0.8. The histogram shows all rows, and a table lists the least stable ones,
+typically rows that sit between two clusters. The \emph{consensus cluster} is the cluster a row was matched to most
+often. Row stability is also added to Cluster Details, the labels file and the Characterization table.
+
+The analysis is fast: about 1.5 to 2 seconds for 10{,}000 rows with KMeans or HDBSCAN.
+
+%=====================================================================
+\section{Working with many runs}
+%=====================================================================
+
+\subsection{Run History}
+
+All runs of the session, newest first: number, time, dataset, reduction, algorithm, number of clusters, noise,
+silhouette, runtime, peak memory and status. \ui{View} shows a run and puts its settings back into the form,
+\ui{Details} lists every setting, and \ui{Labels TSV} and \ui{ZIP} download the results. Failed runs show their error
+and a \ui{Load settings} button.
+
+\subsection{Run Leaderboard}
+
+Ranks the runs and names the best one \emph{for the chosen criterion under the chosen constraints}. Another criterion
+can favour another run; no single score finds the best clustering for every purpose.
+
+\begin{itemize}
+  \item \textbf{Rank by:} silhouette, Calinski--Harabasz, DBCV, stability (higher is better), Davies--Bouldin,
+    runtime (lower is better), or a Pareto ranking over several objectives.
+  \item \textbf{Constraints:} number of clusters, maximum noise, minimum cluster size, maximum runtime, maximum
+    imbalance (largest cluster divided by smallest) and minimum stability. Excluded runs can be shown with the reason.
+  \item \textbf{Recommended badge:} only when the quality (silhouette $\ge 0.25$, or a DBCV threshold) \emph{and} the
+    stability (mean ARI $\ge 0.75$) both reach their thresholds. Runs without a stability analysis cannot get it.
+  \item \textbf{Pin} keeps the current best run in view while you try other settings.
+\end{itemize}
+
+\begin{example}[Pareto ranking]
+Rank by silhouette (higher is better) and runtime (lower is better):
+\begin{center}
+\begin{tabular}{lccl}
+\toprule
+Run & Silhouette & Runtime & Front\\
+\midrule
+A & 0.60 & 10\,s & F1\\
+B & 0.50 & 2\,s & F1\\
+C & 0.40 & 5\,s & F2\\
+\bottomrule
+\end{tabular}
+\end{center}
+B beats C on both objectives, so C is not on the first front. A and B do not beat each other: A has the better
+silhouette, B is faster. Both are on front F1, and choosing between them is up to you.
+\end{example}
+
+\begin{example}[constraints]
+You need between 4 and 8 clusters and at most 10\,\% noise. A DBSCAN run with the best silhouette but 25\,\% noise
+is excluded (shown as ``noise 25.0\% $>$ 10\%'' if you show excluded runs), and the best of the remaining runs is
+named instead.
+\end{example}
+
+\subsection{Compare Runs}
+
+Puts two runs, A and B, side by side: their settings, scatter plots, cluster sizes, profiles, metrics, runtime and
+warnings; the ARI and NMI between them; the differences in parameters, including preprocessing; and how the rows
+move between clusters, as a contingency table or a Sankey diagram.
+
+Because cluster numbers have no meaning across runs (cluster 3 in A has nothing to do with cluster 3 in B), clusters
+are paired by their shared rows. \ui{Color Run B by matched Run A clusters} gives matched clusters the same colour.
+The rows that changed cluster can be downloaded as a list.
+
+\begin{example}
+Run A uses KMeans with 6 clusters, run B the same with 7. The Sankey diagram shows that five clusters pass from A to
+B almost unchanged, while one cluster of A splits into two in B. The list of changed rows contains exactly the
+members of that cluster.
+\end{example}
+
+\subsection{Parameter Sweep}
+
+Runs the selected algorithm several times with different values of one or two of its parameters. The dataset,
+preprocessing, reduction and all other parameters stay the same, so the trials are comparable. By default every
+trial uses all rows.
+
+\begin{itemize}
+  \item For numeric parameters give \emph{from}, \emph{to} and \emph{step}; for options tick the values. \emph{also
+    None} adds the automatic value where a parameter allows it.
+  \item \ui{Max. trials} (up to 30). If there are more combinations, a random subset of combinations is tried, with a
+    fixed seed so it is repeatable. This is a subset of parameter values, not of rows.
+  \item \ui{Screen on a subsample first} (off by default): every trial first runs on a share of the rows (5 to
+    90\,\%), and only the best $k$ by the chosen metric are repeated on all rows. The final results are always on
+    the full data.
+\end{itemize}
+
+\begin{example}[grid or random subset]
+DBSCAN with \param{eps} from 0.3 to 1.0 in steps of 0.1 (8 values) and \param{min\_samples} 3, 5 and 10 gives
+$8\times3=24$ combinations. That fits into 30 trials, so all of them run (grid search). With \param{eps} from 0.1 to
+2.0 (20 values) there are 60 combinations, and 30 of them are chosen at random.
+\end{example}
+
+The result shows a curve of the metric against the parameter (a heatmap for two parameters), a table of the trials
+with \ui{View} buttons, failed trials with their error, and the best trial for the chosen metric and constraints.
+Every finished trial is a normal run with a \emph{sweep} tag, so the Leaderboard, Compare and Stability work on it.
+The whole sweep is one job under the normal limits; trials that do not start before 85\,\% of the time limit are
+marked as skipped.
+
+%=====================================================================
+\section{Downloads and reproducing a run}
+%=====================================================================
+
+\ui{Download All (ZIP)} saves everything about a run:
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.45\textwidth}L}
+\toprule
+File & Content\\
+\midrule
+\texttt{cluster\_assignments.tsv} & Cluster of every row, with name, original row number, plot coordinates, and
+  membership and stability when available.\\
+\texttt{cluster\_sizes.tsv}, \texttt{cluster\_centroids.tsv}, \texttt{cluster\_medians.tsv} & Size, mean and
+  median profile per cluster.\\
+\texttt{cluster\_summary.tsv}, \texttt{cluster\_profile\_bands.tsv}, \texttt{distinguishing\_features.tsv},
+  \texttt{cliffs\_delta\_matrix.tsv}, \texttt{feature\_tests.tsv}, \texttt{outliers.tsv},
+  \texttt{noise\_points.tsv}, \texttt{cluster\_members/} & The characterization.\\
+\texttt{cluster\_stability.tsv} & Stability per cluster, after a stability analysis.\\
+Figures (\texttt{.png} and \texttt{.svg}) & Scatter plot, cluster sizes, cluster profiles.\\
+\texttt{metrics.json}, \texttt{config.json}, \texttt{run\_record.json}, \texttt{software\_versions.json},
+  \texttt{warnings.txt} & Metrics, settings with seeds, the full run record, package versions and warnings.\\
+\texttt{report.html} & A readable report with figures, characterization, stability, settings and a methods text.\\
+\texttt{reproduce.py}, \texttt{preprocessing.py} & Repeat the run outside the web app.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+To repeat a run on your own computer, unpack the ZIP and run:
+
+\begin{lstlisting}
+python reproduce.py my_data.tsv
+\end{lstlisting}
+
+It uses the same preprocessing code and the settings and seeds from \texttt{config.json} in the same folder (a
+different settings file can be given as a second argument). With the package versions listed in
+\texttt{software\_versions.json} it gives the same clusters as the web app.
+
+%=====================================================================
+\section{Running RapCluster yourself}
+%=====================================================================
+
+The hosted version is at \url{https://rapplab.bioanalytik.tu-berlin.de/rapcluster/}. To run your own copy, use
+Docker:
+
+\begin{lstlisting}
+docker compose up --build -d
+\end{lstlisting}
+
+The app is then available at \url{http://localhost:8088/rapcluster/}. On Linux, macOS or WSL, the script
+\texttt{start.sh} does the same and prints the links:
+
+\begin{lstlisting}
+./start.sh
+
+RapCluster is running:
+  Local:           http://localhost:8088/rapcluster/
+  On your network: http://192.168.2.207:8088/rapcluster/
+\end{lstlisting}
+
+Other computers on the same network can open the ``On your network'' link. If it does not load for them, allow
+incoming connections on TCP port 8088 in your firewall. On Windows, in an administrator PowerShell:
+
+\begin{lstlisting}
+New-NetFirewallRule -DisplayName "RapCluster 8088" -Direction Inbound -Protocol TCP -LocalPort 8088 -Action Allow
+\end{lstlisting}
+
+\begin{note}
+The server part of RapCluster uses features that only exist on Linux, so it does not run directly on Windows. On
+Windows, use Docker Desktop or WSL. \texttt{start.sh} runs RapCluster on the machine where you start it; it does
+not deploy anything to the hosted server.
+\end{note}
+
+For development, \texttt{npm run dev} starts the Flask server on \url{http://127.0.0.1:5000} and the web page on
+\url{http://localhost:3000/rapcluster}. The development server forwards the API calls to Flask, so only port 3000
+has to be reachable from other devices.
+
+%=====================================================================
+\section*{Glossary}
+\addcontentsline{toc}{section}{Glossary}
+%=====================================================================
+
+\begin{description}[style=unboxed,leftmargin=0pt,itemsep=3pt]
+  \item[ARI (adjusted Rand index)] Agreement of two clusterings over all pairs of rows, corrected for chance. 1 is
+    identical, about 0 is random.
+  \item[Cliff's $\boldsymbol{\delta}$] Effect size between two groups of values, from $-1$ to $+1$. $|\delta| > 0.47$ is a
+    large effect.
+  \item[$\boldsymbol{\varepsilon^2}$ (epsilon squared)] Effect size of the Kruskal--Wallis test, from 0 to 1.
+  \item[Imputation] Filling missing values.
+  \item[Interquartile range (IQR)] The range between the 25th and the 75th percentile, where the middle half of the
+    values lie.
+  \item[Jaccard overlap] Rows shared by two clusters divided by the rows in either of them.
+  \item[MAD] Median absolute deviation: the median of the distances from the median.
+  \item[Medoid] The cluster member with the smallest total distance to the other members.
+  \item[NMI (normalized mutual information)] How much one clustering tells about another, from 0 to 1.
+  \item[Noise ($-1$)] Rows that density-based algorithms do not assign to any cluster.
+  \item[Pareto front] The runs that no other run beats on every chosen objective at once.
+  \item[Robust z-score] Distance from the median divided by the scaled MAD. Less affected by outliers than the usual
+    z-score.
+  \item[Seed (\texttt{random\_state})] Fixes the random choices of an algorithm, so a run can be repeated exactly.
+  \item[z-score] $(x - \text{mean}) / \text{standard deviation}$: how many standard deviations a value lies from the
+    mean.
+\end{description}
+
+\end{document}

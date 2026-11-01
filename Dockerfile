@@ -37,6 +37,11 @@ COPY supervisord.conf /etc/supervisor/conf.d/app.conf
 # Remove default nginx site to avoid conflicts
 RUN rm -f /etc/nginx/sites-enabled/default
 
+# Compile UMAP's numba functions once at build time so the first analysis is not delayed.
+RUN mkdir -p /tmp/numba_cache /tmp/matplotlib \
+ && python -c "import numpy as np, umap; umap.UMAP(n_neighbors=10, random_state=42).fit_transform(np.random.default_rng(0).random((300, 8)))" \
+ && chmod -R 777 /tmp/numba_cache /tmp/matplotlib
+
 RUN useradd --no-create-home --shell /bin/false appuser \
  && chown -R appuser:appuser /app \
  && chown -R www-data:www-data /usr/share/nginx/html

@@ -8,8 +8,8 @@ const AlgorithmGuideDR = () => (
     <h3>UMAP</h3>
     <p>
       Uniform Manifold Approximation and Projection (UMAP) is a non-linear dimensionality
-      reduction technique that captures both local and global structure. It is well-suited
-      for visualizing clusters in high-dimensional data.
+      reduction method that keeps local and much of the global structure. It works well
+      for visualizing clusters in high-dimensional data and as input for density-based clustering.
     </p>
     <ul>
       <li><strong>n_components:</strong> Number of output dimensions (default: 2).</li>
@@ -23,8 +23,8 @@ const AlgorithmGuideDR = () => (
     <h3>t-SNE</h3>
     <p>
       t-distributed Stochastic Neighbor Embedding (t-SNE) is a probabilistic method
-      that preserves local neighborhood structures. It excels at visualizing
-      small to medium datasets with tight local clusters.
+      that preserves local neighborhoods. It is best suited for visualizing
+      small to medium datasets; the sizes of and distances between groups in the plot have little meaning.
     </p>
     <ul>
       <li><strong>n_components:</strong> Target dimensionality (default: 2).</li>
@@ -39,21 +39,20 @@ const AlgorithmGuideDR = () => (
     <h3>PCA</h3>
     <p>
       Principal Component Analysis (PCA) is a linear dimensionality reduction
-      technique that transforms the data to maximize variance. It is very fast
-      and ideal for capturing global patterns in the data.
+      method that projects the data onto the directions of largest variance. It is fast,
+      deterministic and keeps the global structure of the data.
     </p>
     <ul>
       <li><strong>n_components:</strong> Number of principal components to keep (e.g., 2).</li>
-      <li><strong>whiten:</strong> Whether to normalize components to unit variance.</li>
-      <li><strong>svd_solver:</strong> Algorithm for SVD ('auto', 'full', 'randomized').</li>
-      <li><strong>random_state:</strong> Only used when <code>svd_solver='randomized'</code>.</li>
+      <li><strong>svd_solver:</strong> Algorithm for SVD ('auto', 'full', 'arpack', 'randomized').</li>
+      <li><strong>random_state:</strong> Only used when <code>svd_solver</code> is 'arpack' or 'randomized'.</li>
     </ul>
-    <p><strong>Recommended to tune:</strong>  <code>n_components</code>, <code>whiten</code></p>
+    <p><strong>Recommended to tune:</strong>  <code>n_components</code></p>
 
     <h3>None</h3>
     <p>
-      No dimensionality reduction is applied. The clustering operates directly
-      in the original high-dimensional feature space.
+      No dimensionality reduction is applied. Clustering uses all features after
+      preprocessing; the scatter plot shows a PCA projection for display only.
     </p>
   </div>
 );
