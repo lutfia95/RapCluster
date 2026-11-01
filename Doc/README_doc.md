@@ -117,7 +117,7 @@ Noise rows get the label **-1** and are shown in grey. They are not a cluster an
   recommended* for this data size on the hosted server, with the reason (for example, memory that grows with the
   square of the number of rows).
 
-Limits on the hosted server: 50 MB per upload, 10 minutes and 4 GB per run, 3 runs at the same time. Error messages
+Limits on the hosted server: 50 MB per upload, 10 minutes and 10 GB per run, 8 runs at the same time. Error messages
 say which limit was reached and suggest what to change.
 
 ## Parameter Sweep
