@@ -804,14 +804,44 @@ def job_files(run_dir, kind):
     return {name: os.path.join(run_dir, f"{name}_{kind}.json") for name in ("job", "progress", "outcome")}
 
 
+# Job processes are tracked through /proc on Linux (the server). Elsewhere (e.g. macOS, which has no /proc)
+# psutil is used if installed; without it a basic fallback still keeps runs from being reported as crashed.
+HAVE_PROC = os.path.exists("/proc/self/stat")
+try:
+    import psutil
+except ImportError:
+    psutil = None
+# ru_maxrss is in kilobytes on Linux but in bytes on macOS.
+MAXRSS_PER_MB = 1024 * 1024 if sys.platform == "darwin" else 1024
+
+
+def own_peak_rss_mb():
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / MAXRSS_PER_MB
+
+
 def process_stat(pid):
-    """(state, start_ticks) of a process from /proc, or None if it does not exist."""
-    try:
-        with open(f"/proc/{pid}/stat") as fh:
-            fields = fh.read().rsplit(")", 1)[1].split()
-        return fields[0], int(fields[19])
-    except (OSError, IndexError, ValueError):
+    """(state, start_time) of a process, or None if it does not exist."""
+    if HAVE_PROC:
+        try:
+            with open(f"/proc/{pid}/stat") as fh:
+                fields = fh.read().rsplit(")", 1)[1].split()
+            return fields[0], int(fields[19])
+        except (OSError, IndexError, ValueError):
+            return None
+    if psutil is not None:
+        try:
+            process = psutil.Process(pid)
+            state = "Z" if process.status() == psutil.STATUS_ZOMBIE else "R"
+            return state, int(round(process.create_time() * 100))
+        except (psutil.Error, OSError):
+            return None
+    try:  # no start time available: no guard against a recycled pid
+        os.kill(pid, 0)
+    except ProcessLookupError:
         return None
+    except OSError:
+        pass  # exists, but owned by another user
+    return "R", None
 
 
 def process_alive(job):
@@ -821,14 +851,23 @@ def process_alive(job):
 
 
 def process_rss_mb(pid):
-    try:
-        with open(f"/proc/{pid}/status") as fh:
-            for line in fh:
-                if line.startswith("VmRSS:"):
-                    return int(line.split()[1]) / 1024
-    except OSError:
-        pass
-    return 0.0
+    """Current memory (resident set) of a process in MB; 0 if it cannot be read."""
+    if HAVE_PROC:
+        try:
+            with open(f"/proc/{pid}/status") as fh:
+                for line in fh:
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1]) / 1024
+        except OSError:
+            pass
+        return 0.0
+    if psutil is not None:
+        try:
+            return psutil.Process(pid).memory_info().rss / (1024 * 1024)
+        except (psutil.Error, OSError):
+            return 0.0
+    # Without psutil only the own process can be measured (its peak, which is enough for the limit check).
+    return own_peak_rss_mb() if pid == os.getpid() else 0.0
 
 
 def kill_job_process(job):
@@ -1198,7 +1237,7 @@ def execute_cluster_job(spec, peak, logger):
             "stage_seconds": stage_seconds,
             "warnings": format_warnings(caught),
             "runtime_seconds": {"total": time.perf_counter() - t_start, "clustering": float(runtime)},
-            "peak_memory_mb": max(peak["mb"], resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024),
+            "peak_memory_mb": max(peak["mb"], own_peak_rss_mb()),
         })
         result["run"] = record
         write_json(os.path.join(run_dir, "result.json"), result)

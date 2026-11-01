@@ -9,3 +9,4 @@ hdbscan
 openpyxl
 matplotlib
 xlrd
+psutil
