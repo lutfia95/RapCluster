@@ -10,10 +10,14 @@ RUN npm run build
 # Stage 2: Combined runtime
 FROM python:3.9-slim
 
+# Job limits, sized for the 100 GB server: 8 runs x 10 GB = 80 GB at most, plus ~3 GB base load.
+# Lower them on smaller machines (rule: runs x memory + 3 GB <= RAM), e.g. in compose.yaml.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MPLCONFIGDIR=/tmp/matplotlib \
-    NUMBA_CACHE_DIR=/tmp/numba_cache
+    NUMBA_CACHE_DIR=/tmp/numba_cache \
+    RAPCLUSTER_JOB_MEMORY_MB=10240 \
+    RAPCLUSTER_MAX_CONCURRENT_JOBS=8
 
 WORKDIR /app
 
