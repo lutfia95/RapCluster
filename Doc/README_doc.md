@@ -1,16 +1,21 @@
 # RapCluster web page: user guide
 
-This guide explains every part of the RapCluster web page, from top to bottom. Most labels on the page also have a
+This guide explains every part of the RapCluster web page. Most labels on the page also have a
 small **?** marker: hover over it (or tap it, or focus it with the Tab key) to see a short explanation. On buttons
 and tabs, the same explanation appears as the button's tooltip.
 
-The usual workflow is:
+The page has two columns. The **left column** holds the settings, numbered in the usual order:
 
-1. upload a table (or load an example),
-2. choose the preprocessing,
+1. upload a table (or select an example),
+2. keep the default preprocessing or change it,
 3. choose a dimensionality reduction (optional),
 4. choose a clustering algorithm and its parameters,
-5. run, then look at the results, compare runs and download what you need.
+5. optionally set up a parameter sweep,
+
+followed by **Check data & settings** and **Run Clustering**. The **right column** shows what you open: the
+exploratory analysis, the preflight check, the parameter sweep, or the clustering results. Tabs at its top switch
+between the panels that are open. When a run finishes, the page brings the results into view. Run History, the Run
+Leaderboard and Compare Runs are below both columns. On narrow screens the two columns are stacked.
 
 Every run is saved in the session, so you can try many settings on the same upload and compare them. All data and
 runs are deleted when you close the page.
@@ -21,11 +26,14 @@ runs are deleted when you close the page.
 
 | Field | What it does |
 |---|---|
-| **Select File** | CSV, TSV, XLSX or XLS, up to 50 MB. One row per item (protein, gene, sample, …), one column per measurement. |
-| **Or load example data** | Loads one of the bundled datasets and fills in the name column, data start column and suggested preprocessing. |
+| **Load local file** | CSV, TSV, XLSX or XLS, up to 50 MB. One row per item (protein, gene, sample, …), one column per measurement. |
+| **Select example data** | Loads one of the bundled datasets and fills in the name column, data start column and suggested preprocessing. |
 | **Sheet** | Only for Excel files: the worksheet that holds the data. |
 | **Name of Node Column** | The column with the identifier of each row. It labels points, tables and downloads; it is not clustered. |
 | **Data Start Column Index (0-based)** | Position of the first numeric column, counting from 0. This column and every later one are used as data; earlier columns (names, annotations, known classes) are ignored. |
+
+Below the fields: **Data format** opens a popup with a small example table that shows how the file should look;
+**User manual** opens this guide as a PDF on GitHub; **Webpage tour** opens the video tour on YouTube.
 
 Example datasets:
 
@@ -45,6 +53,12 @@ for clustering, but you can compare the result with it.
 The steps run in the order listed and are saved with every run. The defaults reproduce RapCluster's original
 pipeline.
 
+The **Preprocessing** menu starts at **None**: the values are clustered as uploaded. Empty cells are filled with 0,
+because the algorithms cannot handle them; nothing else is changed or removed. Select **Active** to preprocess the
+data: **Use default preprocessing** is then ticked and all settings are shown with their default values but cannot be
+changed. Untick it to edit them; ticking it again resets them to the defaults. Examples and restored runs set the menu
+to match their settings.
+
 | Setting | Options and meaning |
 |---|---|
 | **Remove rows with more than … % missing values** | Drops rows with too many empty cells. 100 keeps every row. |
@@ -54,7 +68,7 @@ pipeline.
 | **Remove all-zero rows** | Rows without any signal (on by default). |
 | **Remove low-variance columns** | Removes columns whose standard deviation after the transformation is at or below the threshold (0 = constant columns only). |
 | **Remove highly correlated columns** | Removes a column when its correlation with an earlier, kept column is above the threshold. Not recommended for profile data, where neighbouring columns are correlated by nature. |
-| **Explore data with these settings** | Opens the **Exploratory Analysis** panel (see below) without clustering. |
+| **Explore data with these settings** | Opens the **Exploratory Analysis** in the right column (see below) without clustering. |
 
 ### Exploratory Analysis
 
@@ -101,12 +115,14 @@ Noise rows get the label **-1** and are shown in grey. They are not a cluster an
 
 ## Check and run
 
+Both buttons are at the bottom of the left column, after section 5.
+
 - **Check data & settings** inspects the data and the chosen methods without clustering and opens the
-  **Preflight Check** panel.
+  **Preflight Check** in the right column.
 - **Run Clustering** starts the run as a background job. The preflight check runs first; if a method is not
-  recommended for the data size, you are asked before the run starts. A progress bar shows the current stage, and the
-  run can be cancelled.
-- **Watch Youtube Tutorial** links to a video introduction.
+  recommended for the data size, the preflight check opens on the right and asks before the run starts. While the run
+  works, the right column shows its progress, and the run can be cancelled. When it finishes, the results open on the
+  right and are scrolled into view.
 
 ### Preflight Check
 
@@ -120,9 +136,9 @@ Noise rows get the label **-1** and are shown in grey. They are not a cluster an
 Limits on the hosted server: 50 MB per upload, 10 minutes and 10 GB per run, 8 runs at the same time. Error messages
 say which limit was reached and suggest what to change.
 
-## Parameter Sweep
+## 5. Parameter Sweep
 
-Runs the selected algorithm several times with different values of one or two parameters. Preprocessing, reduction and
+Optional. **Set up a parameter sweep** opens the sweep in the right column. It runs the selected algorithm several times with different values of one or two parameters. Preprocessing, reduction and
 all other parameters stay fixed, so the trials are comparable.
 
 - **Parameter 1 / 2**: for numbers give *from*, *to* and *step*; for options tick the values. *also None* adds the
@@ -138,7 +154,8 @@ all other parameters stay fixed, so the trials are comparable.
 
 All runs of the session, newest first: run number, time, dataset, reduction, algorithm, number of clusters, noise,
 Silhouette, runtime, peak memory and status. **View** shows a run and puts its settings back into the form;
-**Details** lists every setting; **Labels TSV** and **ZIP** download the results. Failed runs show their error and a
+**Details** lists every setting. **Report** (red) opens the run's HTML report in a new tab, the same `report.html`
+as in the ZIP; **Download** offers **Download All (ZIP)** and the **cluster labels (TSV)**. Failed runs show their error and a
 **Load settings** button. **Hide / Show** collapses the table.
 
 ## Run Leaderboard
@@ -198,7 +215,9 @@ The panel for the selected run.
 - **Scatter Plot**: every row as a point coloured by cluster. Hover for the name; drag to zoom. A caption template
   below the plot describes the settings for a figure legend.
 - **Clusters Network**: one node per cluster at its centre; edges between clusters are thicker and darker when the
-  clusters are closer. Click a cluster to open its sub-network.
+  clusters are closer. Drag a node to move it; hover texts keep the original distances. **Reset layout** puts the
+  nodes back, **Fit to view** re-centres them, and **Download SVG/PNG** saves the network as arranged. Click a cluster
+  to open its sub-network.
 - **Sub-network View**: the rows of one cluster, each connected to its nearest neighbours (choose 3–20). Draw a lasso
   around points to plot their raw profiles (log10). *Pan/Zoom* switches the mouse mode.
 - **Heatmap**: preprocessed values as colours, either one summary row per cluster (median or mean) or the rows of one
@@ -230,7 +249,7 @@ it as text.
 ### Cluster Details
 
 One table row per data row: name, cluster, plot coordinates, colour, and (when available) membership probability and
-row stability. Click a column header to sort. The table can be hidden.
+row stability. Click a column header to sort. The table is hidden at the start; click **Show table** to open it.
 
 ### Download All (ZIP)
 

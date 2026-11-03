@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import HelpTip from './HelpTip';
 import { HELP } from './helpTexts';
 
@@ -128,6 +128,62 @@ function RunDetails({ run }) {
   );
 }
 
+// Runs created before the report link existed still have the same URL layout.
+const reportLink = (run) => run.links.report || `${run.links.result}/report.html`;
+
+// "Download ▾" button with the run's files.
+const MENU_WIDTH = 190;
+function DownloadMenu({ run, apiBase }) {
+  const [position, setPosition] = useState(null);  // fixed position, so the scrolling table does not clip it
+  const menu = useRef(null);
+  const button = useRef(null);
+  const open = position !== null;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setPosition(null);
+    const closeOutside = (e) => { if (menu.current && !menu.current.contains(e.target)) close(); };
+    const closeOnEscape = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('mousedown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('mousedown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (open) {
+      setPosition(null);
+      return;
+    }
+    const rect = button.current.getBoundingClientRect();
+    setPosition({ top: rect.bottom + 4, left: Math.max(8, rect.right - MENU_WIDTH) });
+  };
+
+  return (
+    <div className="download-menu" ref={menu}>
+      <button type="button" ref={button} onClick={toggle} aria-expanded={open} aria-haspopup="true">
+        Download ▾
+      </button>
+      {open && (
+        <div className="download-menu-list" role="menu" style={{ ...position, width: MENU_WIDTH }}>
+          <a role="menuitem" href={`${apiBase}${run.links.download_zip}`} download onClick={() => setPosition(null)}>
+            Download All (ZIP)
+          </a>
+          <a role="menuitem" href={`${apiBase}${run.links.labels_tsv}`} download onClick={() => setPosition(null)}>
+            Cluster labels (TSV)
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RunHistory({ runs, activeRunId, apiBase, loading, onView, onLoadSettings }) {
   const [expandedRunId, setExpandedRunId] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -165,6 +221,8 @@ function RunHistory({ runs, activeRunId, apiBase, loading, onView, onLoadSetting
               <th>Peak mem. (MB)</th>
               <th>Status</th>
               <th>Actions</th>
+              <th>Report<HelpTip text={HELP.runReport} label="report" /></th>
+              <th>Download</th>
             </tr>
           </thead>
           <tbody>
@@ -217,12 +275,6 @@ function RunHistory({ runs, activeRunId, apiBase, loading, onView, onLoadSetting
                           Load settings
                         </button>
                       )}
-                      {run.status === 'success' && (
-                        <>
-                          <a href={`${apiBase}${run.links.labels_tsv}`} download>Labels TSV</a>
-                          <a href={`${apiBase}${run.links.download_zip}`} download>ZIP</a>
-                        </>
-                      )}
                       <button
                         type="button"
                         className="link-button"
@@ -231,10 +283,26 @@ function RunHistory({ runs, activeRunId, apiBase, loading, onView, onLoadSetting
                         {isExpanded ? 'Hide' : 'Details'}
                       </button>
                     </td>
+                    <td>
+                      {run.status === 'success' ? (
+                        <a
+                          className="report-button"
+                          href={`${apiBase}${reportLink(run)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open the HTML report of this run in a new tab"
+                        >
+                          Report
+                        </a>
+                      ) : '–'}
+                    </td>
+                    <td>
+                      {run.status === 'success' ? <DownloadMenu run={run} apiBase={apiBase} /> : '–'}
+                    </td>
                   </tr>
                   {isExpanded && (
                     <tr className="run-details-row">
-                      <td colSpan={12}>
+                      <td colSpan={14}>
                         <RunDetails run={run} />
                       </td>
                     </tr>
