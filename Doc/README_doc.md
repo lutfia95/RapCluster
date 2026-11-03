@@ -7,7 +7,7 @@ and tabs, the same explanation appears as the button's tooltip.
 The page has two columns. The **left column** holds the settings, numbered in the usual order:
 
 1. upload a table (or select an example),
-2. keep the default preprocessing or change it,
+2. preprocess the data (None, the default pipeline, or your own steps),
 3. choose a dimensionality reduction (optional),
 4. choose a clustering algorithm and its parameters,
 5. optionally set up a parameter sweep,
@@ -112,6 +112,22 @@ show the first two. **Learn More** opens a longer guide.
 | **AffinityPropagation** | Rows elect exemplars; only for small data | preference | no | `preference`, `damping` |
 
 Noise rows get the label **-1** and are shown in grey. They are not a cluster and are left out of the metrics.
+
+**Getting more or fewer clusters:**
+
+| Algorithm | More clusters | Fewer clusters |
+|---|---|---|
+| KMeans, MiniBatchKMeans, BisectingKMeans, AgglomerativeClustering, SpectralClustering | higher `n_clusters` | lower `n_clusters` |
+| GaussianMixture | higher `n_components` | lower `n_components` |
+| BayesianGaussianMixture | higher `n_components` (upper limit) and larger `weight_concentration_prior` | smaller `weight_concentration_prior`; `dirichlet_process` |
+| BIRCH | higher `n_clusters`; with `n_clusters` empty, smaller `threshold` | lower `n_clusters`; larger `threshold` |
+| DBSCAN | smaller `eps` (also more noise) | larger `eps`; larger `min_samples` (also more noise) |
+| HDBSCAN | smaller `min_cluster_size`; `leaf` selection | larger `min_cluster_size`, `min_samples` or `cluster_selection_epsilon` |
+| OPTICS | smaller `xi` | larger `min_samples` or `min_cluster_size` |
+| MeanShift | smaller `bandwidth` | larger `bandwidth` |
+| AffinityPropagation | `preference` closer to 0 | more negative `preference` |
+
+A **Parameter Sweep** (section 5) tries a range of values and plots the number of clusters for each.
 
 ## Check and run
 

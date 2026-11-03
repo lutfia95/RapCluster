@@ -1,16 +1,47 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import cytoscape from 'cytoscape';
 
-// Network of cluster centroids. Nodes start at the cluster centre in the 2D embedding and can be dragged;
-// hover texts always show the original distances. Clicking a node opens its sub-network.
+// Network of cluster centroids. Nodes start at the cluster centre in the 2D embedding (spread apart where they
+// would overlap) and can be dragged; hover texts always show the original distances. Clicking a node opens its
+// sub-network.
 
 const LAYOUT_SIZE = 600; // pixels spanned by the larger axis of the embedding before fitting
 const MIN_NODE = 10;
 const MAX_NODE = 30;
+const MIN_GAP = 70; // minimum centre distance (layout pixels) so circles and the labels above them stay readable
+
+// Pushes overlapping nodes apart until every pair is at least MIN_GAP apart (or the larger circles' radii plus a
+// margin). Nodes that are already apart do not move, so the overall arrangement of the embedding is kept.
+// Deterministic: the same clustering always gives the same layout.
+function spreadOverlapping(positions, diameters) {
+  const pts = positions.map(p => ({ ...p }));
+  for (let iteration = 0; iteration < 500; iteration += 1) {
+    let moved = false;
+    for (let i = 0; i < pts.length; i += 1) {
+      for (let j = i + 1; j < pts.length; j += 1) {
+        const need = Math.max(MIN_GAP, (diameters[i] + diameters[j]) / 2 + 12);
+        let dx = pts[j].x - pts[i].x;
+        let dy = pts[j].y - pts[i].y;
+        let dist = Math.hypot(dx, dy);
+        if (dist >= need - 0.5) continue;
+        if (dist < 1e-6) { // identical centres: separate along a fixed angle per pair
+          const angle = ((i * 7 + j * 13) % 360) * (Math.PI / 180);
+          dx = Math.cos(angle); dy = Math.sin(angle); dist = 1;
+        }
+        const push = (need - dist) / 2 / dist;
+        pts[i].x -= dx * push; pts[i].y -= dy * push;
+        pts[j].x += dx * push; pts[j].y += dy * push;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return pts;
+}
 
 const clusterLabel = (cluster) => (cluster === -1 ? 'Noise (-1)' : `Cluster ${cluster}`);
 
-export function buildNetwork(clusterData, clusterColors, clusterSizes) {
+export function buildNetwork(clusterData, clusterColors, clusterSizes, spread = true) {
   const groups = {};
   (clusterData || []).forEach(d => {
     if (!groups[d.cluster]) groups[d.cluster] = { sx: 0, sy: 0, n: 0 };
@@ -32,15 +63,18 @@ export function buildNetwork(clusterData, clusterColors, clusterSizes) {
   const scale = LAYOUT_SIZE / range;
   const maxSize = Math.max(...centroids.map(c => c.size));
 
-  const nodes = centroids.map(c => ({
+  const diameters = centroids.map(c => (maxSize ? MIN_NODE + (MAX_NODE - MIN_NODE) * (c.size / maxSize) : MIN_NODE));
+  // Screen y grows downwards, so the embedding's y axis is flipped.
+  const centres = centroids.map(c => ({ x: c.x * scale, y: -c.y * scale }));
+  const positions = spread ? spreadOverlapping(centres, diameters) : centres;
+  const nodes = centroids.map((c, index) => ({
     id: `c${c.cluster}`,
     cluster: c.cluster,
     label: clusterLabel(c.cluster),
     size: c.size,
     color: clusterColors?.[c.cluster] || '#000000',
-    diameter: maxSize ? MIN_NODE + (MAX_NODE - MIN_NODE) * (c.size / maxSize) : MIN_NODE,
-    // Screen y grows downwards, so the embedding's y axis is flipped.
-    position: { x: c.x * scale, y: -c.y * scale },
+    diameter: diameters[index],
+    position: positions[index],
   }));
 
   const edges = [];
@@ -117,11 +151,12 @@ function ClusterNetwork({ clusterData, clusterColors, clusterSizes, savedPositio
   const cyRef = useRef(null);
   const clickRef = useRef(onClusterClick);
   const [tooltip, setTooltip] = useState(null);
+  const [spread, setSpread] = useState(true);
   clickRef.current = onClusterClick;
 
   const network = useMemo(
-    () => buildNetwork(clusterData, clusterColors, clusterSizes),
-    [clusterData, clusterColors, clusterSizes],
+    () => buildNetwork(clusterData, clusterColors, clusterSizes, spread),
+    [clusterData, clusterColors, clusterSizes, spread],
   );
 
   useEffect(() => {
@@ -244,6 +279,17 @@ function ClusterNetwork({ clusterData, clusterColors, clusterSizes, savedPositio
       <div className="cluster-network-header">
         <h4>Network of Cluster Centroids</h4>
         <div className="cluster-network-actions">
+          <label className="cluster-network-spread" title="Moves clusters whose circles or labels would overlap just far enough apart. Untick to place every node exactly at its cluster centre.">
+            <input
+              type="checkbox"
+              checked={spread}
+              onChange={(e) => {
+                if (savedPositions) savedPositions.current = {};
+                setSpread(e.target.checked);
+              }}
+            />
+            Spread overlapping clusters
+          </label>
           <button type="button" onClick={resetLayout}>Reset layout</button>
           <button type="button" onClick={() => cyRef.current?.fit(undefined, 40)}>Fit to view</button>
           <button type="button" onClick={downloadSvg}>Download SVG</button>
@@ -251,8 +297,8 @@ function ClusterNetwork({ clusterData, clusterColors, clusterSizes, savedPositio
         </div>
       </div>
       <small className="cluster-network-hint">
-        Drag a node to move it; click a cluster to open its sub-network. Hover texts always show the distances in
-        the 2D embedding, also after nodes were moved.
+        Drag a node to move it; click a cluster to open its sub-network. Overlapping clusters are spread apart
+        automatically; hover texts always show the distances in the 2D embedding, also after nodes were moved.
       </small>
       {/* Cytoscape owns the canvas div; the tooltip is a sibling so React and Cytoscape never share children. */}
       <div className="cluster-network-stage">

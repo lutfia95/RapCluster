@@ -1822,6 +1822,15 @@ h2 {
   font-size: 0.9em;
 }
 
+.cluster-network-spread {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9em;
+  margin-right: 4px;
+  cursor: pointer;
+}
+
 .cluster-network-actions button:hover {
   background: #f0f0f0;
 }
