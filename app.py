@@ -1998,6 +1998,7 @@ def new_run_record(session_id, run_id, number, dataset_meta, settings):
         "cancel": f"{base_link}/cancel",
         "labels_tsv": f"{base_link}/labels.tsv",
         "download_zip": f"{base_link}/download.zip",
+        "report": f"{base_link}/report.html",
         "stability": f"{base_link}/stability",
         "profiles": f"{base_link}/profiles",
         "characterization": f"{base_link}/characterization",
@@ -2687,30 +2688,61 @@ preprocessing.py            RapCluster's preprocessing steps, used by reproduce.
 """
 
 
-@app.route('/api/sessions/<session_id>/runs/<run_id>/download.zip', methods=['GET'])
-def download_run_zip(session_id, run_id):
+def load_finished_run(session_id, run_id, action):
+    """(run_dir, record, result) of a successful run, or (None, None, error response)."""
     try:
         _, run_dir, record = load_run_record(session_id, run_id)
     except ValueError as e:
-        return jsonify({"error": str(e), "code": "invalid_parameters"}), 400
+        return None, None, (jsonify({"error": str(e), "code": "invalid_parameters"}), 400)
     except LookupError as e:
-        return jsonify({"error": str(e), "code": "run_not_found"}), 404
+        return None, None, (jsonify({"error": str(e), "code": "run_not_found"}), 404)
     result = read_json(os.path.join(run_dir, "result.json"))
     if result is None:
-        return jsonify({"error": "Only successful runs can be downloaded.", "code": "no_result"}), 409
+        return None, None, (jsonify({"error": f"Only successful runs can be {action}.", "code": "no_result"}), 409)
+    return run_dir, record, result
 
+
+def report_parts(run_dir, record, result):
+    """Full-data figures and tables shared by report.html and the ZIP download."""
     arrays = load_run_arrays(run_dir)  # full data, not the plotting sample
     groups = group_by_cluster(arrays["labels"])
-    total = len(arrays["labels"])
     colors = result["cluster_colors"]
-    versions = package_versions()
     scatter = scatter_figure(record, arrays["embedding"], colors, groups)
-    sizes = sizes_figure(colors, groups)
-    scatter_svg = figure_bytes(scatter, "svg")
-    profiles = profile_tables(result.get("intensity_columns") or [], arrays["profiles"], groups)
     characterization = read_json(os.path.join(run_dir, "characterization.json"))
     profile_fig = profile_band_figure(characterization, colors) if characterization else None
-    profiles_svg = figure_bytes(profile_fig, "svg").decode("utf-8") if profile_fig else None
+    return {
+        "arrays": arrays, "groups": groups, "colors": colors, "versions": package_versions(),
+        "scatter": scatter, "scatter_svg": figure_bytes(scatter, "svg"),
+        "characterization": characterization, "profile_fig": profile_fig,
+        "profiles_svg": figure_bytes(profile_fig, "svg").decode("utf-8") if profile_fig else None,
+    }
+
+
+@app.route('/api/sessions/<session_id>/runs/<run_id>/report.html', methods=['GET'])
+def view_run_report(session_id, run_id):
+    """The run's HTML report (the same report.html as in the ZIP), shown in the browser."""
+    run_dir, record, result = load_finished_run(session_id, run_id, "shown as a report")
+    if run_dir is None:
+        return result
+    parts = report_parts(run_dir, record, result)
+    page = report_html(record, parts["groups"], parts["scatter_svg"].decode("utf-8"), parts["versions"],
+                       parts["characterization"], parts["profiles_svg"])
+    return Response(page, mimetype="text/html")
+
+
+@app.route('/api/sessions/<session_id>/runs/<run_id>/download.zip', methods=['GET'])
+def download_run_zip(session_id, run_id):
+    run_dir, record, result = load_finished_run(session_id, run_id, "downloaded")
+    if run_dir is None:
+        return result
+
+    parts = report_parts(run_dir, record, result)
+    arrays, groups, colors, versions = parts["arrays"], parts["groups"], parts["colors"], parts["versions"]
+    total = len(arrays["labels"])
+    scatter, scatter_svg = parts["scatter"], parts["scatter_svg"]
+    sizes = sizes_figure(colors, groups)
+    profiles = profile_tables(result.get("intensity_columns") or [], arrays["profiles"], groups)
+    characterization, profile_fig, profiles_svg = parts["characterization"], parts["profile_fig"], parts["profiles_svg"]
     config = {
         "rapcluster_run": record["number"],
         "created_at": record["created_at"],

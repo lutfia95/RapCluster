@@ -259,6 +259,17 @@ export const HELP = {
   // 1. Upload
   upload: 'One row per item (e.g. protein, gene or sample) and one column per measurement. CSV, TSV, XLSX or XLS, up '
     + 'to 50 MB. The file is kept on the server for this session only and is deleted when you close the page.',
+  preprocessingMode: 'None: the values are clustered as uploaded (empty cells are filled with 0, nothing else is '
+    + 'changed). Active: shows the preprocessing settings, starting with the default pipeline; untick "Use default '
+    + 'preprocessing" to change them.',
+  useDefaultPreprocessing: 'Ticked: the default pipeline is used (missing values replaced with 0, log2(x + 1), all-zero '
+    + 'rows removed, per-row z-score); the settings are shown but cannot be changed. Untick to edit them.',
+  sweepSection: 'Optional. Tries several values of one or two parameters of the selected algorithm; the settings and '
+    + 'results open on the right. Every finished trial becomes a normal run.',
+  dataFormat: 'Shows how the table should be laid out: one row per item, identifier and annotation columns first, '
+    + 'then the numeric measurement columns.',
+  manual: 'The RapCluster user manual (PDF) on GitHub: every part of the page, with worked examples.',
+  tour: 'A video tour of the web page on YouTube.',
   example: 'Bundled example datasets. Loading one also sets the name column, the data start column and suitable '
     + 'preprocessing settings.',
   sheet: 'Worksheet of the Excel file that holds the data.',
@@ -326,7 +337,8 @@ export const HELP = {
   tabScatter: 'Every row as a point, colored by cluster, in the first two dimensions of the reduction (or a PCA '
     + 'projection without reduction). Hover over a point for its name; drag to zoom.',
   tabNetwork: 'One node per cluster, placed at the cluster centre; edges connect clusters, thicker for closer '
-    + 'clusters. Click a cluster to open its Sub-network View.',
+    + 'clusters. Drag a node to move it (Reset layout puts it back); hover texts keep the original distances. Click a '
+    + 'cluster to open its Sub-network View.',
   tabSubnetwork: 'Network of the rows of one cluster, each connected to its nearest neighbours. Draw a lasso around '
     + 'points to plot their raw profiles. Becomes available after clicking a cluster in the Clusters Network.',
   tabHeatmap: 'Preprocessed values as colors: a summary row per cluster (median or mean), or the rows of one cluster. '
@@ -341,8 +353,12 @@ export const HELP = {
 
   // Run management
   runHistory: 'Every run of this session, newest first. View shows a run\'s results and puts its settings back into '
-    + 'the form; for failed runs, Load settings does the same. Details lists all settings. Labels TSV and ZIP '
-    + 'download the results. Runs are deleted when you close the page.',
+    + 'the form; for failed runs, Load settings does the same. Details lists all settings. Report opens the run\'s '
+    + 'HTML report in a new tab; Download offers the ZIP with all results and the cluster labels as TSV. Runs are '
+    + 'deleted when you close the page.',
+  runReport: 'Opens the analysis report of the run in a new browser tab: summary and metrics, scatter plot, cluster '
+    + 'sizes, characterization, stability, preprocessing, parameters, methods text and software versions. It is the '
+    + 'same report.html that the ZIP download contains.',
   leaderboard: 'Ranks the runs by a quality measure, after removing runs that break the constraints you set. The best '
     + 'run depends on the chosen measure; no single score finds the best clustering in general.',
   rankBy: 'Silhouette, Calinski–Harabasz and DBCV: higher is better. Davies–Bouldin and runtime: lower is better. '

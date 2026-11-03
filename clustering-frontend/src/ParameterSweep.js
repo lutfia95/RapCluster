@@ -65,9 +65,10 @@ function entryValues(definition, entry) {
   return definition.nullable && entry.includeNone ? [...base, null] : base;
 }
 
-function ParameterSweep({ algorithm, paramDefs, reductionMethod, canRun, apiBase, runs, loading, onStart, onRefreshRuns, onView }) {
+// Shown in the right-hand panel when section 5 is opened, so it is always expanded there.
+function ParameterSweep({ algorithm, paramDefs, reductionMethod, canRun, apiBase, runs, loading, onStart, onRefreshRuns, onView, onClose }) {
   const sweepable = useMemo(() => (paramDefs || []).filter(def => def.name !== 'random_state'), [paramDefs]);
-  const [open, setOpen] = useState(false);
+  const open = true;
   const [entries, setEntries] = useState([]);
   const [maxTrials, setMaxTrials] = useState(20);
   const [screening, setScreening] = useState({ enabled: false, fraction: 20, top_k: 3, metric: 'silhouette' });
@@ -243,16 +244,14 @@ function ParameterSweep({ algorithm, paramDefs, reductionMethod, canRun, apiBase
   return (
     <section className="sweep-section">
       <div className="explore-header">
-        <h2>Parameter Sweep<HelpTip text={HELP.sweep} label="parameter sweep" /></h2>
-        <button type="button" className="details-toggle" onClick={() => setOpen(value => !value)} aria-expanded={open}>
-          {open ? 'Hide ▲' : 'Show ▼'}
-        </button>
+        <h2>5. Parameter Sweep<HelpTip text={HELP.sweep} label="parameter sweep" /></h2>
+        {onClose && <button type="button" className="details-toggle" onClick={onClose}>Close ✕</button>}
       </div>
       {open && (
         <>
           <p className="compare-note">
             Runs {algorithm} several times with different values of one or two parameters. Preprocessing, dimensionality
-            reduction ({reductionMethod}) and all other parameters are taken from the settings above and stay fixed, so the
+            reduction ({reductionMethod}) and all other parameters are taken from the settings on the left and stay fixed, so the
             metrics of the trials are comparable. Every trial becomes a normal run in Run History. The whole sweep is one
             job with the usual time and memory limits.
           </p>

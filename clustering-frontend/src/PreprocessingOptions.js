@@ -15,6 +15,21 @@ export const DEFAULT_PREPROCESSING = {
   scaling: 'row_zscore',
 };
 
+// 'None' in the Preprocessing menu: values are clustered as uploaded. Missing cells still have to be filled
+// (0) because the algorithms cannot handle them; nothing else is changed or removed.
+export const NO_PREPROCESSING = {
+  ...DEFAULT_PREPROCESSING,
+  transform: 'none',
+  remove_zero_rows: false,
+  scaling: 'none',
+};
+
+const sameOptions = (options, reference) => (
+  Object.keys(reference).every(key => options?.[key] === reference[key])
+);
+export const isDefaultPreprocessing = (options) => sameOptions(options, DEFAULT_PREPROCESSING);
+export const isNoPreprocessing = (options) => sameOptions(options, NO_PREPROCESSING);
+
 const IMPUTATION = [
   { value: 'zero', label: 'Replace with 0 (default)' },
   { value: 'min', label: 'Column minimum' },
@@ -62,9 +77,10 @@ const SCALING = [
   },
 ];
 
-function PreprocessingOptions({ options, onChange, onExplore, disabled }) {
+// mode 'none': no preprocessing, the settings are hidden. mode 'active': the settings are shown; with
+// useDefaults they stay at their defaults and locked, unticking the box makes them editable.
+function PreprocessingOptions({ options, onChange, mode, onModeChange, useDefaults, onUseDefaultsChange, onExplore, disabled }) {
   const set = (key, value) => onChange({ ...options, [key]: value });
-  const isDefault = Object.keys(DEFAULT_PREPROCESSING).every(key => options[key] === DEFAULT_PREPROCESSING[key]);
   const scalingHint = SCALING.find(item => item.value === options.scaling)?.hint;
   const setNumber = (key, value, factor = 1) => {
     const number = parseFloat(value);
@@ -77,13 +93,25 @@ function PreprocessingOptions({ options, onChange, onExplore, disabled }) {
       <p className="preprocessing-intro">
         Every step is applied in this order and recorded with the run. The defaults reproduce RapCluster's original
         pipeline.
-        {!isDefault && (
-          <button type="button" className="link-button" onClick={() => onChange({ ...DEFAULT_PREPROCESSING })}>
-            Reset to defaults
-          </button>
-        )}
       </p>
 
+      <div className="form-group preprocessing-mode">
+        <label htmlFor="prep-mode">Preprocessing:<HelpTip text={HELP.preprocessingMode} label="preprocessing mode" /></label>
+        <select id="prep-mode" value={mode} onChange={(e) => onModeChange(e.target.value)}>
+          <option value="none">None</option>
+          <option value="active">Active</option>
+        </select>
+      </div>
+
+      {mode === 'active' && (<>
+      <label className="checkbox-label use-default-preprocessing">
+        <input type="checkbox" checked={useDefaults} onChange={(e) => onUseDefaultsChange(e.target.checked)} />
+        Use default preprocessing<HelpTip text={HELP.useDefaultPreprocessing} label="default preprocessing" />
+      </label>
+      {useDefaults && <small className="locked-note">Untick to change the settings below.</small>}
+
+      {/* A disabled fieldset locks every input inside it while still showing the values. */}
+      <fieldset className="preprocessing-fields" disabled={useDefaults}>
       <div className="preprocessing-grid">
         <div className="form-group">
           <label htmlFor="prep-max-missing">Remove rows with more than … % missing values:<HelpTip text={HELP.maxMissing} label="missing values filter" /></label>
@@ -181,6 +209,8 @@ function PreprocessingOptions({ options, onChange, onExplore, disabled }) {
           </span>
         )}
       </div>
+      </fieldset>
+      </>)}
 
       <button type="button" className="explore-button" onClick={onExplore} disabled={disabled} title={HELP.explore}>
         Explore data with these settings
