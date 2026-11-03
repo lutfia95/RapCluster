@@ -1975,8 +1975,9 @@ function App() {
                 <h2>Getting started</h2>
                 <ol>
                   <li>Load a local file or select an example dataset in <strong>1. Upload Data</strong>.</li>
-                  <li>Keep the default preprocessing or untick it to change the steps; <strong>Explore data with these
-                    settings</strong> shows the prepared data here.</li>
+                  <li>Leave <strong>2. Preprocessing</strong> at None to cluster the values as uploaded, or select Active
+                    to use the default pipeline or your own steps; <strong>Explore data with these settings</strong> shows
+                    the prepared data here.</li>
                   <li>Choose a dimensionality reduction (3.) and a clustering algorithm (4.).</li>
                   <li>Optionally set up a <strong>5. Parameter Sweep</strong> to try several parameter values.</li>
                   <li><strong>Check data &amp; settings</strong> or <strong>Run Clustering</strong>: the check and the

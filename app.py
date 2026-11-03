@@ -1,4 +1,5 @@
 import io
+import inspect
 import os
 import re
 import sys
@@ -448,13 +449,22 @@ def read_table(file_content, file_type, sheet_name=None):
     raise ValueError(f"Unsupported file type: {file_type}")
 
 
+def tsne_kwargs(params):
+    """RapCluster stores the iteration count as n_iter; scikit-learn renamed it to max_iter (1.5) and removed
+    n_iter (1.7). Passes it under the name the installed version accepts."""
+    params = dict(params)
+    if "n_iter" in params and "max_iter" in inspect.signature(TSNE.__init__).parameters:
+        params["max_iter"] = params.pop("n_iter")
+    return params
+
+
 def apply_dimensionality_reduction(X, method, params):
     """Applies the selected dimensionality reduction; the clustering uses all returned dimensions."""
     if method == "UMAP":
         reducer = umap.UMAP(**params)
         X_reduced = reducer.fit_transform(X)
     elif method == "TSNE":
-        reducer = TSNE(**params)
+        reducer = TSNE(**tsne_kwargs(params))
         X_reduced = reducer.fit_transform(X)
     elif method == "PCA":
         reducer = PCA(**params)
@@ -2933,7 +2943,7 @@ def dataset_checks(df, intensity_start_index, name_column, size_bytes, options):
             checks.append({"check": "Scaling", "value": "none", "level": "warning",
                            "message": f"Column spreads differ by a factor of {positive.max() / positive.min():,.0f}; "
                                       "distance-based clustering will be dominated by the widest columns. "
-                                      "Consider per-column scaling."})
+                                      "Consider per-column scaling (Preprocessing: Active)."})
 
     if name_column in df.columns:
         names = df[name_column].astype(str)

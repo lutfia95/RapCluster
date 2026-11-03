@@ -9,6 +9,7 @@ The script mirrors RapCluster's pipeline (preprocessing -> dimensionality reduct
 clustering -> evaluation) using the settings stored in config.json, writes
 reproduced_assignments.tsv and prints the validation metrics.
 """
+import inspect
 import json
 import os
 import sys
@@ -34,6 +35,15 @@ def read_table(path, sheet_name):
     return pd.read_excel(path, sheet_name=sheet_name if sheet_name else 0)
 
 
+def tsne_kwargs(params):
+    """RapCluster stores the iteration count as n_iter; scikit-learn renamed it to max_iter (1.5) and removed
+    n_iter (1.7). Passes it under the name the installed version accepts."""
+    params = dict(params)
+    if "n_iter" in params and "max_iter" in inspect.signature(TSNE.__init__).parameters:
+        params["max_iter"] = params.pop("n_iter")
+    return params
+
+
 def reduce(X, method, params, all_dimensions=True):
     """Clustering uses every reduced dimension (or all features without reduction). Configs without
     "clustering_dims" describe runs that used only the first two dimensions."""
@@ -41,7 +51,7 @@ def reduce(X, method, params, all_dimensions=True):
         import umap
         X = umap.UMAP(**params).fit_transform(X)
     elif method == "TSNE":
-        X = TSNE(**params).fit_transform(X)
+        X = TSNE(**tsne_kwargs(params)).fit_transform(X)
     elif method == "PCA":
         X = PCA(**params).fit_transform(X)
     return X if all_dimensions else X[:, :2]
