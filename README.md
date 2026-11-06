@@ -80,8 +80,6 @@ npm install
 cd clustering-frontend
 npm start
 ```
-### Usage
-Check the demo video at [Demo](https://github.com/lutfia95/RapCluster/blob/main/demo.mp4).
 
 ## Clustering Algorithms
 
