@@ -3,3 +3,4 @@ changing_report_27102026.md
 node_modules/
 clustering-frontend/node_modules/
 examples/test_10k_140.tsv
+clustering-frontend/build
