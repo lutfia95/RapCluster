@@ -259,8 +259,18 @@ The panel for the selected run.
 
 ### Method Details
 
-A summary of the run's settings and a methods paragraph you can adapt for a paper. **Download Method Details** saves
-it as text.
+All settings of the run (data file, sheet, name column, data start column, every preprocessing option, the
+dimensionality reduction and the clustering algorithm with all parameters incl. random seeds) and a methods paragraph
+you can adapt for a paper. **Download Method Details** saves it as text; **Download settings (JSON)** saves the same
+settings as JSON (same layout as `config.json` in the run ZIP, so `reproduce.py` reads it too).
+
+To repeat an analysis, open **1. Upload Data → Reuse settings from a previous analysis**:
+
+- **Paste Method Details**: paste the Method Details text and click **Apply settings**.
+- **Load from JSON**: choose the settings JSON (or `config.json` / `run_record.json` from a run ZIP), or paste it.
+
+All settings are put into the form; then load the same data file (RapCluster warns when the file name differs) and
+run. Values that are unknown or invalid are listed and replaced by the defaults.
 
 ### Cluster Details
 

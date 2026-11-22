@@ -21,6 +21,10 @@ import StabilityAnalysis from './StabilityAnalysis';
 import ParameterSweep from './ParameterSweep';
 import ClusterNetwork from './ClusterNetwork';
 import HelpTip from './HelpTip';
+import SettingsImport from './SettingsImport';
+import {
+  configFromRun, formatMethodDetails, normalizeConfig, parseMethodDetails, parseSettingsJson, settingsJson,
+} from './settingsTransfer';
 import { ALGORITHM_HELP, HELP, REDUCTION_HELP, paramHelp } from './helpTexts';
 
 // Hides the page from screen readers while a popup is open.
@@ -74,7 +78,10 @@ const methodDescriptions = {
 
 function App() {
   const [file, setFile] = useState(null);
-  const [methodDetails, setMethodDetails] = useState('');
+  // The run record shown in the results; its settings make up the Method Details and the settings JSON.
+  const [resultRun, setResultRun] = useState(null);
+  // Sheet named by loaded settings; chosen when an Excel file with that sheet is loaded.
+  const preferredSheetRef = useRef(null);
   // Node positions of the draggable cluster network, kept while switching plot tabs; cleared per run.
   const networkPositionsRef = useRef({});
   const [subnetworkData, setSubnetworkData] = useState([]);
@@ -495,13 +502,15 @@ function App() {
             setExcelSheetNames(sheetNames);
             setExcelColumnsBySheet(columnsBySheet);
 
-            const defaultSheet = sheetNames[0] || '';
+            const preferredSheet = preferredSheetRef.current;
+            const defaultSheet = sheetNames.includes(preferredSheet) ? preferredSheet : (sheetNames[0] || '');
             const headers = defaultSheet ? (columnsBySheet[defaultSheet] || []) : [];
-            const defaultNameColumn = headers[0] || 'Name';
 
             setSelectedSheetName(defaultSheet);
             setColumnNames(headers);
-            setNameColumn(defaultNameColumn);
+            setNameColumn(previousNameColumn => (
+              headers.includes(previousNameColumn) ? previousNameColumn : (headers[0] || 'Name')
+            ));
           } catch (readError) {
             console.error('Failed to read Excel metadata:', readError);
             setExcelSheetNames([]);
@@ -621,27 +630,7 @@ function App() {
     );
   };
 
-  const formatParamValue = (value) => (value === null || value === undefined ? 'None' : String(value));
-
-  const buildMethodDetails = (algorithm, algorithmValues, reduction, reductionValues) => {
-    const lineFor = (values) => (p) => (
-      `- ${p.name}: ${formatParamValue(p.name in values ? values[p.name] : p.default)}`
-    );
-
-    let details = `Clustering Algorithm: ${algorithm}\n`;
-    details += `  → ${methodDescriptions.clustering[algorithm] || 'No description.'}\n`;
-    details += `${(algoParams[algorithm] || []).map(lineFor(algorithmValues)).join('\n')}\n\n`;
-
-    if (reduction === 'None') {
-      details += `Dimensionality Reduction: None\n`;
-      details += `  → ${methodDescriptions.reduction.None}\n`;
-    } else {
-      details += `Dimensionality Reduction: ${reduction}\n`;
-      details += `  → ${methodDescriptions.reduction[reduction] || 'No description.'}\n`;
-      details += (reductionParamsDef[reduction] || []).map(lineFor(reductionValues)).join('\n');
-    }
-    return details;
-  };
+  const settingsDefinitions = { algoParams, reductionParamsDef, descriptions: methodDescriptions };
 
   const uploadDataset = async () => {
     const formData = new FormData();
@@ -671,28 +660,74 @@ function App() {
     setSelectedProfileNames([]);
     setActiveTab(previousTab => (previousTab === 'subnetwork' ? 'scatter' : previousTab));
     setActiveRunId(data.run ? data.run.run_id : null);
+    setResultRun(data.run || null);
     networkPositionsRef.current = {};
   };
 
-  // Puts a run's algorithm and reduction settings back into the form so it can be tweaked and re-run.
-  const restoreRunSettings = (run) => {
+  // Puts normalized settings (see settingsTransfer.normalizeConfig) into the form.
+  const applySettingsToForm = ({ reduction, clustering, preprocessingOptions: options }) => {
     const matchesDefaults = (definitions, values) => definitions.every(p => values[p.name] === p.default);
 
-    const algorithmDefaults = matchesDefaults(algoParams[run.clustering.algorithm] || [], run.clustering.params);
-    setSelectedAlgorithm(run.clustering.algorithm);
+    const algorithmDefaults = matchesDefaults(algoParams[clustering.algorithm] || [], clustering.params);
+    setSelectedAlgorithm(clustering.algorithm);
     setUseDefaultAlgorithmParams(algorithmDefaults);
-    setCustomAlgorithmParams(algorithmDefaults ? {} : run.clustering.params);
+    setCustomAlgorithmParams(algorithmDefaults ? {} : clustering.params);
 
-    const reductionDefaults = matchesDefaults(reductionParamsDef[run.reduction.method] || [], run.reduction.params);
-    setSelectedReduction(run.reduction.method);
+    const reductionDefaults = matchesDefaults(reductionParamsDef[reduction.method] || [], reduction.params);
+    setSelectedReduction(reduction.method);
     setUseDefaultReductionParams(reductionDefaults);
-    const runOptions = { ...DEFAULT_PREPROCESSING, ...(run.preprocessing.options || {}) };
-    applyPreprocessingOptions(runOptions);
-    setCustomReductionParams(reductionDefaults ? {} : run.reduction.params);
+    setCustomReductionParams(reductionDefaults ? {} : reduction.params);
+    if (options) applyPreprocessingOptions(options);
+  };
 
-    setMethodDetails(buildMethodDetails(
-      run.clustering.algorithm, run.clustering.params, run.reduction.method, run.reduction.params
-    ));
+  // Puts a run's algorithm, reduction and preprocessing settings back into the form so it can be tweaked and re-run.
+  const restoreRunSettings = (run) => {
+    applySettingsToForm({
+      reduction: run.reduction,
+      clustering: run.clustering,
+      preprocessingOptions: { ...DEFAULT_PREPROCESSING, ...(run.preprocessing.options || {}) },
+    });
+  };
+
+  // "Reuse settings" in 1. Upload Data: Method Details text or settings JSON of an earlier analysis.
+  const handleImportSettings = (kind, text) => {
+    if (!algoParams || !Object.keys(algoParams).length) {
+      throw new Error('The algorithm list has not been loaded from the server yet. Please try again in a moment.');
+    }
+    const raw = kind === 'json' ? parseSettingsJson(text) : parseMethodDetails(text);
+    const { settings, warnings } = normalizeConfig(raw, { algoParams, reductionParamsDef });
+
+    applySettingsToForm(settings);
+    if (settings.intensityStartIndex !== null) setIntensityStartIndex(settings.intensityStartIndex);
+    if (settings.nameColumn !== null) {
+      setNameColumn(settings.nameColumn);
+      if (columnNames.length && !columnNames.includes(settings.nameColumn)) {
+        warnings.push(`The loaded file has no column "${settings.nameColumn}"; please choose the name column.`);
+      }
+    }
+    preferredSheetRef.current = settings.sheetName;
+    if (settings.sheetName && fileType === 'xlsx') {
+      if (excelSheetNames.includes(settings.sheetName)) {
+        handleExcelSheetChange(settings.sheetName);
+        if (settings.nameColumn !== null) setNameColumn(settings.nameColumn);
+      } else {
+        warnings.push(`The loaded workbook has no sheet "${settings.sheetName}".`);
+      }
+    }
+    const expectedFile = settings.dataset.filename;
+    if (expectedFile && fileName && fileName !== expectedFile) {
+      warnings.push(`These settings were made for "${expectedFile}", but "${fileName}" is loaded.`);
+    } else if (expectedFile && !fileName) {
+      warnings.push(`Now load the data file these settings were made for: "${expectedFile}".`);
+    }
+    setAwaitingConfirmation(false);
+    return {
+      warnings,
+      summary: `${settings.reduction.method === 'None' ? 'no reduction' : settings.reduction.method} → `
+        + `${settings.clustering.algorithm}${settings.preprocessingOptions ? ', preprocessing' : ''}`
+        + `${settings.nameColumn !== null ? `, name column "${settings.nameColumn}"` : ''}`
+        + `${settings.intensityStartIndex !== null ? `, data from column ${settings.intensityStartIndex}` : ''}.`,
+    };
   };
 
   const handleViewRun = async (run) => {
@@ -819,9 +854,7 @@ function App() {
     setClusterProfiles(null);
     setHeatmapCluster('summary');
     setActiveRunId(null);
-    setMethodDetails(buildMethodDetails(
-      selectedAlgorithm, settings.finalAlgorithmParams, selectedReduction, settings.finalReductionParams
-    ));
+    setResultRun(null);
 
     console.log("Sending reduction params:", settings.finalReductionParams);
     console.log("Sending clustering params:", settings.finalAlgorithmParams);
@@ -1580,21 +1613,34 @@ function App() {
     showlegend: false
   };
 
+  const downloadText = (content, filename, type) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const downloadMethodDetails = () => {
     if (!methodDetails.trim()) {
       alert("No method details available to download.");
       return;
     }
-  
-    const blob = new Blob([methodDetails], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `method_details_${selectedAlgorithm}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadText(methodDetails, `method_details_run${methodConfig?.rapcluster_run ?? ''}_${methodConfig?.clustering.algorithm}.txt`,
+      'text/plain;charset=utf-8');
+  };
+
+  const downloadSettingsJson = () => {
+    if (!methodConfig) {
+      alert("No settings available to download.");
+      return;
+    }
+    downloadText(settingsJson(methodConfig), `rapcluster_settings_run${methodConfig.rapcluster_run ?? ''}.json`,
+      'application/json;charset=utf-8');
   };
 
   // --- Helper to clear file input ---
@@ -1616,38 +1662,27 @@ function App() {
     }
   };
 
-  const getFormattedParamText = (definitions, customParams, useDefaults) => (
-    definitions
-      .map(param => {
-        const value = useDefaults ? param.default : (customParams[param.name] ?? param.default);
-        return `${param.name}=${value}`;
-      })
-      .join(', ')
-  );
+  // Method Details, settings JSON and the methods template describe the run shown in the results (not the form).
+  const methodConfig = configFromRun(activeRun || resultRun);
+  const methodDetails = methodConfig ? formatMethodDetails(methodConfig, settingsDefinitions) : '';
 
-  const clusteringParamText = selectedAlgorithm
-    ? getFormattedParamText(algoParams[selectedAlgorithm] || [], customAlgorithmParams, useDefaultAlgorithmParams)
-    : '';
+  const formatParamText = (values) => Object.entries(values || {})
+    .map(([name, value]) => `${name}=${value === null || value === undefined ? 'None' : value}`)
+    .join(', ');
 
-  const reductionParamText = selectedReduction !== 'None'
-    ? getFormattedParamText(
-        reductionParamsDef[selectedReduction] || [],
-        customReductionParams,
-        useDefaultReductionParams
-      )
-    : '';
-
-  const methodsTemplateText = selectedAlgorithm
-    ? selectedReduction === 'None'
-      ? `Clustering was applied without dimensionality reduction using ${selectedAlgorithm}${
-          clusteringParamText ? ` with the following parameters: ${clusteringParamText}` : ''
-        }.`
-      : `The data were first reduced in dimensionality using ${selectedReduction}${
+  const methodsTemplateText = (() => {
+    if (!methodConfig) return '';
+    const { algorithm, params } = methodConfig.clustering;
+    const { method, params: reductionValues } = methodConfig.reduction;
+    const clusteringParamText = formatParamText(params);
+    const reductionParamText = formatParamText(reductionValues);
+    const clusteredWith = `${algorithm}${clusteringParamText ? ` with the following parameters: ${clusteringParamText}` : ''}`;
+    return method === 'None'
+      ? `Clustering was applied without dimensionality reduction using ${clusteredWith}.`
+      : `The data were first reduced in dimensionality using ${method}${
           reductionParamText ? ` with the following parameters: ${reductionParamText}` : ''
-        }, and then clustered using ${selectedAlgorithm}${
-          clusteringParamText ? ` with the following parameters: ${clusteringParamText}` : ''
-        }.`
-    : '';
+        }, and then clustered using ${clusteredWith}.`;
+  })();
 
   return (
     <div className="App">
@@ -1745,6 +1780,8 @@ function App() {
                 </select>
               </div>
             )}
+
+            <SettingsImport onApply={handleImportSettings} disabled={loading} />
 
             <div className="form-group">
               <label htmlFor="name-column">Name of Node Column:<HelpTip text={HELP.nameColumn} label="name column" /></label>
@@ -2461,6 +2498,22 @@ function App() {
                       }}>
                         Download Method Details
                       </button>
+                      <button onClick={downloadSettingsJson} style={{
+                        marginTop: '10px',
+                        marginLeft: '8px',
+                        padding: '8px 12px',
+                        backgroundColor: '#6a1b9a',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                      }} title={HELP.settingsJson}>
+                        Download settings (JSON)
+                      </button>
+                      <p className="settings-reuse-note">
+                        To repeat this analysis, paste the text above or load the JSON file under
+                        <strong> 1. Upload Data → Reuse settings from a previous analysis</strong>.
+                      </p>
                     </div>
 
                   <div className="cluster-details">

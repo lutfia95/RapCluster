@@ -1871,3 +1871,89 @@ h2 {
   left: 0;
   top: 0;
 }
+
+/* Reuse settings (1. Upload Data): Method Details text or settings JSON of an earlier analysis */
+.settings-import-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-import-buttons button,
+.settings-import-actions button {
+  padding: 8px 14px;
+  border: 1px solid #007bff;
+  border-radius: 4px;
+  background-color: #fff;
+  color: #007bff;
+  cursor: pointer;
+}
+
+.settings-import-buttons button.active,
+.settings-import-actions button:not(.secondary) {
+  background-color: #007bff;
+  color: #fff;
+}
+
+.settings-import-actions button:disabled {
+  border-color: #ccc;
+  background-color: #eee;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.settings-import-panel {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #d0d7e2;
+  border-radius: 6px;
+  background-color: #f8fafd;
+}
+
+.settings-import-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.settings-import-or {
+  color: #666;
+  font-size: 0.9em;
+}
+
+.settings-import-panel textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: monospace;
+  font-size: 0.85em;
+  resize: vertical;
+}
+
+.settings-import-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-import-message {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.settings-import-message ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.settings-import-message.success { background-color: #e8f5e9; color: #1b5e20; }
+.settings-import-message.warning { background-color: #fff8e1; color: #6d4c00; }
+.settings-import-message.error { background-color: #fdecea; color: #a12622; }
+
+.settings-reuse-note {
+  margin: 10px 0 0;
+  font-size: 0.9em;
+  color: #555;
+}
