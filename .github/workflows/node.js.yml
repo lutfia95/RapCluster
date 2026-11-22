@@ -1,5 +1,4 @@
 name: Frontend CI
-
 on:
   push:
     branches: [main]
