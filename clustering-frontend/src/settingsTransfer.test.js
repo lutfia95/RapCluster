@@ -84,3 +84,17 @@ test('sweep configuration uses the fixed parameters', () => {
   }, defs);
   expect(settings.clustering.params).toEqual({ n_clusters: 5, random_state: 7, init: 'random' });
 });
+
+test('a suggestion changes only what it names; a new algorithm starts from its defaults', async () => {
+  const { mergeSuggestion } = await import('./settingsTransfer');
+  const base = configFromRun(run);
+  const merged = mergeSuggestion(base, {
+    preprocessing: { options: { scaling: 'row_zscore' } },
+    clustering: { algorithm: 'KMeans', params: { n_clusters: 4 } },
+  }, defs);
+  expect(merged.preprocessing.options).toEqual({ ...run.preprocessing.options, scaling: 'row_zscore' });
+  expect(merged.reduction.params).toEqual(run.reduction.params);
+  expect(merged.clustering).toEqual({ algorithm: 'KMeans', params: { n_clusters: 4, random_state: 42, init: 'k-means++' } });
+  const { warnings } = normalizeConfig(merged, defs);
+  expect(warnings).toEqual([]);
+});

@@ -11,6 +11,7 @@
 ![UMAP](https://img.shields.io/badge/UMAP_%7C_HDBSCAN-supported-5C3EE8)
 ![Plotly](https://img.shields.io/badge/Plotly-interactive_plots-3F4F75?logo=plotly&logoColor=white)
 ![Formats](https://img.shields.io/badge/input-CSV_%7C_TSV_%7C_Excel-217346?logo=microsoftexcel&logoColor=white)
+![Assistant](https://img.shields.io/badge/assistant-Qwen2.5_7B_%28local%29-0d7f74?logo=ollama&logoColor=white)
 ![Reproducible](https://img.shields.io/badge/reproducible-settings_JSON_%7C_reproduce.py-8A2BE2)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#run-with-docker)
 ![Platform](https://img.shields.io/badge/platform-Linux_%7C_macOS_%7C_Windows-FCC624?logo=linux&logoColor=black)
@@ -50,6 +51,23 @@ Official public instance (separate server, not this machine): https://rapplab.bi
 ```
 Other people on the same network can open the "On your network" link. If it does not load for them,
 allow inbound TCP port 8088 in your machine's firewall.
+
+### Clustering Assistant (Qwen2.5 7B)
+The **Clustering Assistant** button next to *Download All (ZIP)* opens a chat about the shown run with
+[Qwen2.5 7B Instruct](https://ollama.com/library/qwen2.5), a language model that runs locally on the CPU via
+[Ollama](https://ollama.com) (about 5–6 GB RAM, no data leaves the server). It knows all results of the run and
+can suggest settings that are applied to the form with one click (details: [Doc/](Doc)).
+
+- **Docker:** `docker compose up --build` builds a second container, `assistant` (`llm-server/Dockerfile`), and
+  downloads the model (~4.7 GB) while building, so the first build takes a few minutes longer. The model is then
+  part of the image and works without internet access.
+- **Without Docker:** install Ollama, run `ollama pull qwen2.5:7b` once and keep `ollama serve` running; the backend
+  connects to `http://127.0.0.1:11434`. Without it RapCluster works as usual; the Clustering Assistant tab says that the
+  assistant is not available.
+- Settings (environment of the backend): `RAPCLUSTER_ASSISTANT_URL`, `RAPCLUSTER_ASSISTANT_MODEL` (default
+  `qwen2.5:7b`; another Ollama model also works, e.g. the faster `phi4-mini`), `RAPCLUSTER_ASSISTANT_CONTEXT` (tokens, default 8192),
+  `RAPCLUSTER_ASSISTANT_MAX_TOKENS` (answer length, default 700), `RAPCLUSTER_ASSISTANT_MAX_STREAMS` (answers at once
+  per backend worker, default 2; further questions get a "busy" message).
 
 
 ### Create and activate a Conda environment

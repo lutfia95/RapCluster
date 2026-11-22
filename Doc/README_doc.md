@@ -290,6 +290,27 @@ row stability. Click a column header to sort. The table is hidden at the start; 
 | `report.html` | Readable report with figures, characterization, stability, settings and methods text |
 | `reproduce.py`, `preprocessing.py` | `python reproduce.py <data file>` repeats the run outside the web app |
 
+### Clustering Assistant
+
+**Clustering Assistant**, next to **Download All (ZIP)**, opens the tab **Clustering Assistant — Run #N** on the right. There you can ask
+questions about the run in plain language, or start with one of the suggested questions (summary, separation of the
+clusters, what makes each cluster different, stability, settings to try next, a results paragraph for a paper).
+
+- The answers come from **Qwen2.5 7B Instruct**, a language model that runs **locally on the RapCluster server**
+  (CPU, about 5–6 GB RAM). No data leaves the server.
+- The assistant knows all results of the run: data and preprocessing, settings, all quality metrics, every cluster
+  (size, most distinguishing features, central and representative members, membership/persistence, stability),
+  the features that differ most between clusters, the most unusual rows, the stability analysis (once computed),
+  warnings, the methods text, and the other runs of the session for comparison. It does not compute anything
+  itself, so it can only talk about numbers RapCluster has calculated.
+- When it suggests different settings, the answer contains a settings block with an **Apply these settings to the
+  form** button. Only the named settings change; the rest stay as in the explained run. Then click
+  **Run Clustering** to try them.
+- Each run keeps its own conversation while you switch runs or tabs; **New conversation** starts over, **Stop**
+  ends an answer early.
+- It is a small model: check important statements against the numbers in the results. On a CPU the first answer
+  can take up to a minute while the model reads the results; follow-up answers start faster.
+
 ---
 
 ## Glossary

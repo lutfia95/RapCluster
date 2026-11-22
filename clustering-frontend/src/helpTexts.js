@@ -349,6 +349,7 @@ export const HELP = {
     + 'cluster survives. Shows whether a cluster is a real pattern or depends on chance.',
   methodDetails: 'All settings of this run (data columns, preprocessing, reduction, clustering incl. random seeds), with a methods paragraph you can adapt for a paper. Paste this text under 1. Upload Data → Reuse settings to repeat the analysis.',
   settingsJson: 'Downloads all settings of this run as JSON (same layout as config.json in the run ZIP, so reproduce.py can read it). Load it under 1. Upload Data → Reuse settings to repeat the analysis.',
+  assistant: 'Opens a chat about this run with a local language model (Qwen2.5 7B) that runs locally on the RapCluster server. It knows all results of the run and the other runs of the session, explains them and can suggest settings to try next, which you can apply to the form with one click.',
   settingsImport: 'Applies all settings of an earlier analysis to the form: paste its Method Details text, or upload/paste its settings JSON (also config.json or run_record.json from a run ZIP). Then load the same data file and run.',
   clusterDetails: 'One table row per data row with its cluster, plot coordinates and color. Click a column header to '
     + 'sort. Membership and stability columns appear when they are available.',

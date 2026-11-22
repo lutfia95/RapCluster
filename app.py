@@ -47,7 +47,7 @@ from hdbscan.validity import validity_index
 from matplotlib.figure import Figure
 import matplotlib.colors as mcolors
 from matplotlib import colormaps
-from flask import Flask, Response, request, jsonify, send_file
+from flask import Flask, Response, request, jsonify, send_file, stream_with_context
 from flask_cors import CORS
 
 import preprocessing as pp
@@ -55,6 +55,7 @@ from characterization import TEST_NOTE, characterize
 from exploration import explore as explore_dataset
 import stability as stab
 import sweep as sw
+import assistant as llm
 
 
 app = Flask(__name__)
@@ -2726,6 +2727,129 @@ def report_parts(run_dir, record, result):
         "characterization": characterization, "profile_fig": profile_fig,
         "profiles_svg": figure_bytes(profile_fig, "svg").decode("utf-8") if profile_fig else None,
     }
+
+
+# --- Clustering Assistant (local Qwen2.5 7B via Ollama, see assistant.py) ----------------------------------
+
+# Answers stream for a while (CPU inference); limit how many run at once in each gunicorn worker so that
+# chats cannot occupy all request threads.
+ASSISTANT_STREAMS = threading.BoundedSemaphore(int(os.environ.get("RAPCLUSTER_ASSISTANT_MAX_STREAMS", 2)))
+
+
+def assistant_settings_lines():
+    """Algorithm, method, parameter and option names the assistant may use in suggested settings."""
+    def describe(definitions):
+        parts = []
+        for p in definitions:
+            if p["type"] == "select":
+                parts.append(f"{p['name']} ({'/'.join(str(o) for o in p['options'])})")
+            elif "min" in p and "max" in p:
+                parts.append(f"{p['name']} ({p['type']} {p['min']}-{p['max']})")
+            else:
+                parts.append(f"{p['name']} ({p['type']})")
+        return ", ".join(parts)
+    lines = [f"clustering.algorithm {name}: {describe(defs)}" for name, defs in ALGORITHM_PARAMS.items()]
+    lines += [f"reduction.method {name}: {describe(defs)}" for name, defs in REDUCTION_PARAMS.items()]
+    lines.append("reduction.method None (no reduction)")
+    lines.append("preprocessing.options: imputation (" + "/".join(pp.IMPUTATION) + "), transform ("
+                 + "/".join(pp.TRANSFORM) + "), scaling (" + "/".join(pp.SCALING) + "), remove_zero_rows (true/false), "
+                 "remove_low_variance (true/false), variance_threshold (float), correlation_filter (true/false), "
+                 "correlation_threshold (0-1), max_missing_fraction (0-1)")
+    return lines
+
+
+def assistant_run_context(session_dir, run_dir, record, result, *, other_runs=(), title=None, compact=False):
+    characterization = read_json(os.path.join(run_dir, "characterization.json"))
+    stability_details = read_json(os.path.join(run_dir, "stability.json")) if record.get("stability") else None
+    labels_sizes = {}
+    if characterization is None:
+        labels = np.load(os.path.join(run_dir, "labels.npy"))
+        labels_sizes = {int(c): int(n) for c, n in zip(*np.unique(labels, return_counts=True))}
+    return llm.build_context(
+        record,
+        characterization=characterization,
+        stability_details=stability_details,
+        labels_sizes=labels_sizes,
+        preprocessing_rows=preprocessing_rows(record),
+        model_rows=model_rows(record),
+        stability_rows=stability_rows(record.get("stability")),
+        methods_text=methods_text(record),
+        other_runs=other_runs,
+        available_settings=None if compact else assistant_settings_lines(),
+        display_note=(result.get("display") or {}).get("description") or record.get("display"),
+        title=title,
+        compact=compact,
+    )
+
+
+def assistant_context(session_dir, run_dir, record, result, history):
+    """The explained run in full, plus the full results of other runs the user names in the questions."""
+    runs = list_run_records(session_dir)
+    parts = [assistant_run_context(session_dir, run_dir, record, result, other_runs=runs)]
+    by_number = {run.get("number"): run for run in runs if run.get("status") == "success"}
+    for number in llm.mentioned_runs(history, record.get("number")):
+        other = by_number.get(number)
+        if other is None:
+            parts.append(f"(Run #{number} was mentioned, but this session has no successful run with that number.)")
+            continue
+        other_dir = run_dir_path(session_dir, other["run_id"])
+        other_result = read_json(os.path.join(other_dir, "result.json"))
+        if other_result is None:
+            continue
+        parts.append(assistant_run_context(
+            session_dir, other_dir, other, other_result, compact=True,
+            title=f"FULL RESULTS OF RUN #{number} (named in the question; compare it with Run #{record.get('number')})"))
+    return "\n\n".join(parts)
+
+
+@app.route('/api/assistant/status', methods=['GET'])
+def assistant_status():
+    return jsonify(llm.status())
+
+
+@app.route('/api/sessions/<session_id>/runs/<run_id>/assistant', methods=['POST'])
+def run_assistant(session_id, run_id):
+    """Answers a question about the run; streams NDJSON lines {"delta": text} (or {"replace": whole answer}),
+    then {"done": true} or {"error": ...}."""
+    run_dir, record, result = load_finished_run(session_id, run_id, "explained")
+    if run_dir is None:
+        return result
+    try:
+        history = llm.clean_history((request.get_json(silent=True) or {}).get("messages"))
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "invalid_parameters"}), 400
+    context = assistant_context(get_session_dir(session_id), run_dir, record, result, history)
+    if not ASSISTANT_STREAMS.acquire(blocking=False):
+        return jsonify({"error": "The assistant is answering other questions right now.",
+                        "hint": "Please ask again in a moment.", "code": "assistant_busy"}), 503
+
+    released = []
+
+    def release():  # once, whether the stream finished, failed or was never read
+        if not released:
+            released.append(True)
+            ASSISTANT_STREAMS.release()
+
+    def generate():
+        try:
+            for kind, text in llm.stream_chat(context, history):
+                # "replace": the model started repeating itself; the browser shows this shortened answer instead.
+                yield json.dumps({kind: text}) + "\n"
+            yield json.dumps({"done": True}) + "\n"
+        except llm.AssistantUnavailable as e:
+            yield json.dumps({"error": str(e), "code": "assistant_unavailable"}) + "\n"
+        except Exception as e:  # the stream has started, so errors must be sent as a line, not a status code
+            app.logger.warning("Assistant answer failed: %s", e, exc_info=True)
+            yield json.dumps({"error": f"The assistant stopped unexpectedly: {e}", "code": "assistant_failed"}) + "\n"
+        finally:
+            release()
+
+    response = Response(stream_with_context(generate()), mimetype="application/x-ndjson")
+    # No buffering or compression on the way (nginx, dev-server proxy), so the words appear as they are written.
+    response.headers["Cache-Control"] = "no-cache, no-transform"
+    response.headers["X-Accel-Buffering"] = "no"
+    response.call_on_close(release)
+    return response
 
 
 @app.route('/api/sessions/<session_id>/runs/<run_id>/report.html', methods=['GET'])

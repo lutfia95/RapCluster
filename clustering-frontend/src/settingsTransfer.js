@@ -296,3 +296,26 @@ export const parseMethodDetails = (text) => {
   }
   return config;
 };
+
+// Settings suggested by the results assistant name only what changes; this puts them on top of the run's
+// settings. A new algorithm or reduction method starts from its own defaults instead of the old parameters.
+export const mergeSuggestion = (base, suggestion, { algoParams = {}, reductionParamsDef = {} } = {}) => {
+  if (!suggestion || typeof suggestion !== 'object') throw new Error('The suggestion is not a settings object.');
+  const merged = JSON.parse(JSON.stringify(base));
+  const defaults = (definitions) => Object.fromEntries((definitions || []).map(p => [p.name, p.default]));
+
+  if (suggestion.preprocessing?.options) {
+    merged.preprocessing.options = { ...merged.preprocessing.options, ...suggestion.preprocessing.options };
+  }
+  if (suggestion.reduction) {
+    const method = suggestion.reduction.method ?? merged.reduction.method;
+    const start = method === base.reduction.method ? base.reduction.params : defaults(reductionParamsDef[method]);
+    merged.reduction = { method, params: { ...start, ...(suggestion.reduction.params || {}) } };
+  }
+  if (suggestion.clustering) {
+    const algorithm = suggestion.clustering.algorithm ?? merged.clustering.algorithm;
+    const start = algorithm === base.clustering.algorithm ? base.clustering.params : defaults(algoParams[algorithm]);
+    merged.clustering = { algorithm, params: { ...start, ...(suggestion.clustering.params || {}) } };
+  }
+  return merged;
+};

@@ -22,8 +22,9 @@ import ParameterSweep from './ParameterSweep';
 import ClusterNetwork from './ClusterNetwork';
 import HelpTip from './HelpTip';
 import SettingsImport from './SettingsImport';
+import RunAssistant from './RunAssistant';
 import {
-  configFromRun, formatMethodDetails, normalizeConfig, parseMethodDetails, parseSettingsJson, settingsJson,
+  configFromRun, formatMethodDetails, mergeSuggestion, normalizeConfig, parseMethodDetails, parseSettingsJson, settingsJson,
 } from './settingsTransfer';
 import { ALGORITHM_HELP, HELP, REDUCTION_HELP, paramHelp } from './helpTexts';
 
@@ -173,6 +174,11 @@ function App() {
   // 'none': no preprocessing, settings hidden; 'active': the settings are shown, starting at the defaults.
   const [preprocessingMode, setPreprocessingMode] = useState('none');
   const activeRun = runs.find(run => run.run_id === activeRunId);
+  // Results assistant: one conversation per run, kept while switching runs and panels.
+  const [assistantStatus, setAssistantStatus] = useState(null);
+  const [assistantRunId, setAssistantRunId] = useState(null);
+  const [assistantChats, setAssistantChats] = useState({});
+  const assistantRun = runs.find(run => run.run_id === assistantRunId);
 
   // Right-hand panel: 'welcome', 'explore', 'preflight', 'sweep' or 'results'.
   const [rightPanel, setRightPanel] = useState('welcome');
@@ -194,6 +200,7 @@ function App() {
     { id: 'explore', label: 'Explore data', show: Boolean(exploreData) },
     { id: 'preflight', label: 'Preflight check', show: Boolean(preflightReport) },
     { id: 'sweep', label: '5. Parameter sweep', show: rightPanel === 'sweep' || sweepOpened },
+    { id: 'assistant', label: assistantRun ? `Clustering Assistant — Run #${assistantRun.number}` : 'Clustering Assistant', show: Boolean(assistantRun) },
   ].filter(tab => tab.show);
 
   const handleUseDefaultPreprocessing = (checked) => {
@@ -348,6 +355,13 @@ function App() {
       .catch(e => console.error("Failed to fetch example datasets:", e));
   }, []);
 
+  const refreshAssistantStatus = useCallback(() => {
+    fetchJson(`${API_BASE}/assistant/status`)
+      .then(setAssistantStatus)
+      .catch(e => setAssistantStatus({ available: false, model: null, reason: formatApiError(e) }));
+  }, []);
+  useEffect(refreshAssistantStatus, [refreshAssistantStatus]);
+
   useEffect(() => {
     fetchJson(`${API_BASE}/limits`)
       .then(setLimits)
@@ -365,9 +379,10 @@ function App() {
   useEffect(() => {
     const gone = (rightPanel === 'explore' && !exploreData)
       || (rightPanel === 'preflight' && !preflightReport)
+      || (rightPanel === 'assistant' && !assistantRun)
       || (rightPanel === 'results' && !hasResults && !jobProgress && !loading);
     if (gone) setRightPanel(hasResults || jobProgress ? 'results' : 'welcome');
-  }, [rightPanel, exploreData, preflightReport, hasResults, jobProgress, loading]);
+  }, [rightPanel, exploreData, preflightReport, hasResults, jobProgress, loading, assistantRun]);
 
   useEffect(() => {
     if (!panelScrollRequest || !rightPanelRef.current) return;
@@ -728,6 +743,18 @@ function App() {
         + `${settings.nameColumn !== null ? `, name column "${settings.nameColumn}"` : ''}`
         + `${settings.intensityStartIndex !== null ? `, data from column ${settings.intensityStartIndex}` : ''}.`,
     };
+  };
+
+  const openAssistant = (run) => {
+    setAssistantRunId(run.run_id);
+    refreshAssistantStatus();
+    showPanel('assistant');
+  };
+
+  // "Apply these settings" in an answer: the suggestion changes the explained run's settings.
+  const handleApplySuggestion = (run, suggestion) => {
+    const merged = mergeSuggestion(configFromRun(run), suggestion, { algoParams, reductionParamsDef });
+    return handleImportSettings('json', JSON.stringify(merged));
   };
 
   const handleViewRun = async (run) => {
@@ -2062,6 +2089,17 @@ function App() {
               />
 
             </div>
+            <div hidden={rightPanel !== 'assistant'}>
+              <RunAssistant
+                run={assistantRun}
+                url={assistantRun ? `${API_BASE}/sessions/${sessionId}/runs/${assistantRun.run_id}/assistant` : ''}
+                status={assistantStatus}
+                messages={(assistantRun && assistantChats[assistantRun.run_id]) || []}
+                onMessagesChange={(messages) => setAssistantChats(chats => ({ ...chats, [assistantRun.run_id]: messages }))}
+                onApplySettings={(suggestion) => handleApplySuggestion(assistantRun, suggestion)}
+                onClose={() => { setAssistantRunId(null); closePanel('assistant'); }}
+              />
+            </div>
             <div hidden={rightPanel !== 'results'}>
               {jobProgress && (
                 <div className="job-progress" role="status">
@@ -2087,6 +2125,16 @@ function App() {
                     <a className="download-all-button" href={`${API_BASE}${activeRun.links.download_zip}`} title={HELP.downloadZip}>
                       Download All (ZIP)
                     </a>
+                  )}
+                  {activeRun && (
+                    <button
+                      type="button"
+                      className="explain-button"
+                      onClick={() => openAssistant(activeRun)}
+                      title={assistantStatus && !assistantStatus.available ? assistantStatus.reason : HELP.assistant}
+                    >
+                      Clustering Assistant
+                    </button>
                   )}
                   {sampling?.sampled && (
                     <div className="sampling-note">
