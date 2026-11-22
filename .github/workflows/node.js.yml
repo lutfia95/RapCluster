@@ -1,0 +1,31 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clustering-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: clustering-frontend/package-lock.json
+      - run: npm ci
+      - name: Unit tests
+        run: npx react-scripts test --watchAll=false
+        env:
+          CI: true
+      # CI=false: lint warnings are reported but do not fail the build.
+      - name: Production build
+        run: npm run build
+        env:
+          CI: false

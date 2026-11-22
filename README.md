@@ -1,5 +1,7 @@
 # RapCluster
 
+[![Frontend CI](https://github.com/lutfia95/RapCluster/actions/workflows/node.js.yml/badge.svg?branch=main)](https://github.com/lutfia95/RapCluster/actions/workflows/node.js.yml)
+[![Python CI](https://github.com/lutfia95/RapCluster/actions/workflows/python.yml/badge.svg?branch=main)](https://github.com/lutfia95/RapCluster/actions/workflows/python.yml)
 [![Web app](https://img.shields.io/badge/web_app-online-2ea44f?logo=googlechrome&logoColor=white)](https://rapplab.bioanalytik.tu-berlin.de/rapcluster/)
 ![Python](https://img.shields.io/badge/Python-3.9-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-backend-000000?logo=flask&logoColor=white)
