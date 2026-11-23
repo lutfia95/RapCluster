@@ -91,3 +91,21 @@ test('an answer the server stopped for repeating itself is replaced by the short
   expect(await screen.findByText(/started to repeat itself/)).toBeInTheDocument();
   expect(screen.queryByText(/Loop\. Loop\./)).not.toBeInTheDocument();
 });
+
+test('what the assistant looked up is listed and not sent back to the server', async () => {
+  global.fetch = jest.fn(async () => streamingResponse([
+    { tool: 'Read cluster 2 of Run #3' }, { delta: 'Run #3, Cluster 2 has 12 rows.' }, { done: true },
+  ]));
+  render(<Harness />);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Question about the results' }), { target: { value: 'Cluster 2 of run 3?' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+
+  expect(await screen.findByText('Run #3, Cluster 2 has 12 rows.')).toBeInTheDocument();
+  expect(screen.getByText('Read cluster 2 of Run #3')).toBeInTheDocument();
+
+  fireEvent.change(screen.getByRole('textbox', { name: 'Question about the results' }), { target: { value: 'And run 4?' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+  await screen.findByText('And run 4?');
+  const [, request] = global.fetch.mock.calls[1];
+  expect(JSON.parse(request.body).messages[1]).toEqual({ role: 'assistant', content: 'Run #3, Cluster 2 has 12 rows.' });
+});

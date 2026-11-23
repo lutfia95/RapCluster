@@ -2076,6 +2076,13 @@ h2 {
   font-style: italic;
 }
 
+.assistant-steps {
+  margin: 2px 0 6px;
+  padding-left: 18px;
+  color: #777;
+  font-size: 0.85em;
+}
+
 .assistant-apply {
   display: flex;
   flex-wrap: wrap;

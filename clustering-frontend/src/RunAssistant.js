@@ -8,6 +8,8 @@ const SUGGESTED_QUESTIONS = [
   'How good is this clustering? Are the clusters well separated?',
   'What makes each cluster different?',
   'How stable are the clusters?',
+  'Which rows are in each cluster?',
+  'Compare this run with the other runs of the session.',
   'Which settings should I try next, and why?',
   'Write a short results paragraph for a paper.',
 ];
@@ -64,13 +66,14 @@ const renderAnswer = (text) => text.split(/(```[\s\S]*?(?:```|$))/g).map((part, 
   );
 });
 
-// Streams the answer (NDJSON lines {"delta"} / {"replace"} / {"done"} / {"error"}); onText(text, replace) gets
-// each piece, or the whole shortened answer when the server stopped a repeating answer.
-const streamAnswer = async (url, messages, onText, signal) => {
+// Streams the answer (NDJSON lines {"delta"} / {"tool"} / {"replace"} / {"done"} / {"error"}); onText(text, replace)
+// gets each piece, or the whole shortened answer when the server stopped a repeating answer; onTool(note) gets what
+// the assistant looked up (another run, a cluster's members, ...).
+const streamAnswer = async (url, messages, onText, onTool, signal) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages: messages.map(({ role, content }) => ({ role, content })) }),
     signal,
   });
   if (!response.ok) {
@@ -89,6 +92,7 @@ const streamAnswer = async (url, messages, onText, signal) => {
       const chunk = JSON.parse(line);
       if (chunk.error) throw new Error(chunk.error);
       if (chunk.replace !== undefined) onText(chunk.replace, true);
+      else if (chunk.tool) onTool(chunk.tool);
       else if (chunk.delta) onText(chunk.delta, false);
     }
     if (done) return;
@@ -119,7 +123,9 @@ function RunAssistant({ run, url, status, messages, onMessagesChange, onApplySet
     if (!content || pending) return;
     const history = [...messages, { role: 'user', content }];
     let answer = '';
-    onMessagesChange([...history, { role: 'assistant', content: '' }]);
+    let steps = [];
+    const show = (content) => onMessagesChange([...history, { role: 'assistant', content, steps }]);
+    show('');
     setQuestion('');
     setError(null);
     setPending(true);
@@ -128,13 +134,16 @@ function RunAssistant({ run, url, status, messages, onMessagesChange, onApplySet
     try {
       await streamAnswer(url, history, (text, replace) => {
         answer = replace ? text : answer + text;
-        onMessagesChange([...history, { role: 'assistant', content: answer }]);
+        show(answer);
+      }, (note) => {
+        steps = [...steps, note];
+        show(answer);
       }, controller.signal);
       if (!answer.trim()) throw new Error('The assistant returned an empty answer. Please ask again.');
     } catch (e) {
       if (e.name !== 'AbortError') setError(formatApiError(e));
       // Keep a partial answer; drop an empty one so the conversation stays user/assistant alternating.
-      onMessagesChange(answer.trim() ? [...history, { role: 'assistant', content: `${answer} …` }] : history);
+      onMessagesChange(answer.trim() ? [...history, { role: 'assistant', content: `${answer} …`, steps }] : history);
     } finally {
       setPending(false);
       abortRef.current = null;
@@ -160,9 +169,10 @@ function RunAssistant({ run, url, status, messages, onMessagesChange, onApplySet
         <button type="button" className="details-toggle" onClick={onClose}>Close ✕</button>
       </div>
       <p className="assistant-note">
-        {status?.model ? `${status.model} ` : ''}runs locally on the RapCluster server and knows all results of this
-        run (metrics, clusters, characterization, stability, settings, warnings) and a summary of the other runs of
-        this session. To compare with another run in detail, name it in your question (e.g. &quot;compare with run 5&quot;).
+        {status?.model ? `${status.model} ` : ''}runs locally on the RapCluster server. It knows all results of this
+        run (metrics, clusters and their members, characterization, stability, settings, warnings) and can look up
+        every other run of this session: any cluster with all its members, where a row ended up in each run, how two
+        runs agree. Name runs by number (e.g. &quot;compare run 2 with run 5&quot;, &quot;cluster 3 of run 4&quot;).
         It is a small language model: check important statements against the numbers in the results.
       </p>
 
@@ -187,10 +197,17 @@ function RunAssistant({ run, url, status, messages, onMessagesChange, onApplySet
           return (
             <div key={index} className={`assistant-turn ${message.role}`}>
               <div className="assistant-turn-label">{message.role === 'user' ? 'You' : 'Assistant'}</div>
+              {message.steps?.length > 0 && (
+                <ul className="assistant-steps">
+                  {message.steps.map((step, j) => <li key={j}>{step}</li>)}
+                </ul>
+              )}
               <div className="assistant-turn-text">
                 {message.content
                   ? renderAnswer(message.content)
-                  : <span className="assistant-thinking">Reading the results of Run #{run.number}…</span>}
+                  : <span className="assistant-thinking">
+                    {message.steps?.length ? 'Reading what it looked up…' : `Reading the results of Run #${run.number}…`}
+                  </span>}
               </div>
               {suggestions.map((suggestion, j) => {
                 const key = `${index}-${j}`;
@@ -231,7 +248,7 @@ function RunAssistant({ run, url, status, messages, onMessagesChange, onApplySet
               ask(question);
             }
           }}
-          placeholder={available ? `Ask about the results of Run #${run.number}…` : 'The assistant is not available.'}
+          placeholder={available ? `Ask about Run #${run.number} or any other run of this session…` : 'The assistant is not available.'}
           rows={2}
           maxLength={2000}
           disabled={!available}

@@ -55,8 +55,11 @@ allow inbound TCP port 8088 in your machine's firewall.
 ### Clustering Assistant (Qwen2.5 7B)
 The **Clustering Assistant** button next to *Download All (ZIP)* opens a chat about the shown run with
 [Qwen2.5 7B Instruct](https://ollama.com/library/qwen2.5), a language model that runs locally on the CPU via
-[Ollama](https://ollama.com) (about 5–6 GB RAM, no data leaves the server). It knows all results of the run and
-can suggest settings that are applied to the form with one click (details: [Doc/](Doc)).
+[Ollama](https://ollama.com) (about 6–7 GB RAM, no data leaves the server). It knows all results of the run
+(including the members of each cluster on data up to 400 rows) and every run of the session in one line each, and
+looks up the rest itself through tools: all results of any run, one cluster with all its members, in which cluster a
+row is in each run, how two runs agree, one feature across the clusters. The chat lists what it looked up. It can
+suggest settings that are applied to the form with one click (details: [Doc/](Doc)).
 
 - **Docker:** `docker compose up --build` builds a second container, `assistant` (`llm-server/Dockerfile`), and
   downloads the model (~4.7 GB) while building, so the first build takes a few minutes longer. The model is then
@@ -65,7 +68,8 @@ can suggest settings that are applied to the form with one click (details: [Doc/
   connects to `http://127.0.0.1:11434`. Without it RapCluster works as usual; the Clustering Assistant tab says that the
   assistant is not available.
 - Settings (environment of the backend): `RAPCLUSTER_ASSISTANT_URL`, `RAPCLUSTER_ASSISTANT_MODEL` (default
-  `qwen2.5:7b`; another Ollama model also works, e.g. the faster `phi4-mini`), `RAPCLUSTER_ASSISTANT_CONTEXT` (tokens, default 8192),
+  `qwen2.5:7b`; another Ollama model also works, e.g. the faster `phi4-mini`; models without tool calling answer from
+the run's results alone), `RAPCLUSTER_ASSISTANT_CONTEXT` (tokens, default 16384),
   `RAPCLUSTER_ASSISTANT_MAX_TOKENS` (answer length, default 700), `RAPCLUSTER_ASSISTANT_MAX_STREAMS` (answers at once
   per backend worker, default 2; further questions get a "busy" message).
 

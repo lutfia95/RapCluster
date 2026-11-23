@@ -2758,13 +2758,18 @@ def assistant_settings_lines():
     return lines
 
 
-def assistant_run_context(session_dir, run_dir, record, result, *, other_runs=(), title=None, compact=False):
+def assistant_run_context(session_dir, run_dir, record, result, *, other_runs=(), title=None, compact=False,
+                          with_members=False):
     characterization = read_json(os.path.join(run_dir, "characterization.json"))
     stability_details = read_json(os.path.join(run_dir, "stability.json")) if record.get("stability") else None
+    labels = np.load(os.path.join(run_dir, "labels.npy"))
     labels_sizes = {}
     if characterization is None:
-        labels = np.load(os.path.join(run_dir, "labels.npy"))
         labels_sizes = {int(c): int(n) for c, n in zip(*np.unique(labels, return_counts=True))}
+    members = None
+    if with_members and len(labels) <= llm.MAX_INLINE_MEMBERS:
+        names = read_json(os.path.join(run_dir, "names.json")) or []
+        members = {c: [names[i] for i in idx] for c, idx in group_by_cluster(labels).items()}
     return llm.build_context(
         record,
         characterization=characterization,
@@ -2779,13 +2784,15 @@ def assistant_run_context(session_dir, run_dir, record, result, *, other_runs=()
         display_note=(result.get("display") or {}).get("description") or record.get("display"),
         title=title,
         compact=compact,
+        members=members,
     )
 
 
 def assistant_context(session_dir, run_dir, record, result, history):
-    """The explained run in full, plus the full results of other runs the user names in the questions."""
+    """The explained run in full (with member names on small data), one line per run of the session, plus the
+    full results of other runs the user names in the questions (the model can also look them up with tools)."""
     runs = list_run_records(session_dir)
-    parts = [assistant_run_context(session_dir, run_dir, record, result, other_runs=runs)]
+    parts = [assistant_run_context(session_dir, run_dir, record, result, other_runs=runs, with_members=True)]
     by_number = {run.get("number"): run for run in runs if run.get("status") == "success"}
     for number in llm.mentioned_runs(history, record.get("number")):
         other = by_number.get(number)
@@ -2802,6 +2809,129 @@ def assistant_context(session_dir, run_dir, record, result, history):
     return "\n\n".join(parts)
 
 
+def _tool_int(value, label):
+    """Run and cluster numbers as the model writes them: 3, "3", "#3", "run 3", "noise"."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be a number.")
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip().lower()
+    if label == "cluster" and text.startswith("noise"):
+        return -1
+    match = re.search(r"-?\d+", text)
+    if not match:
+        raise ValueError(f"{label} must be a number, not {value!r}.")
+    return int(match.group())
+
+
+def assistant_tools(session_dir, open_record):
+    """call_tool(name, arguments) for the assistant: looks up stored results of any run of the session."""
+    runs = {run.get("number"): run for run in list_run_records(session_dir)}
+    loaded = {}
+
+    def number_of(value):
+        return open_record.get("number") if value in (None, "") else _tool_int(value, "run")
+
+    def load(value):
+        number = number_of(value)
+        record = runs.get(number)
+        if record is None:
+            raise LookupError(f"This session has no Run #{number}. Runs: "
+                              + ", ".join(f"#{n}" for n in sorted(runs)) + ".")
+        if record.get("status") != "success":
+            raise LookupError(f"Run #{number} has no results (status: {record.get('status')}).")
+        if number not in loaded:
+            run_dir = run_dir_path(session_dir, record["run_id"])
+            loaded[number] = {"dir": run_dir, "record": record, "arrays": load_run_arrays(run_dir),
+                              "characterization": read_json(os.path.join(run_dir, "characterization.json"))}
+        return loaded[number]
+
+    def get_run_results(run=None):
+        data = load(run)
+        result = read_json(os.path.join(data["dir"], "result.json")) or {}
+        number = data["record"]["number"]
+        return assistant_run_context(session_dir, data["dir"], data["record"], result, compact=True,
+                                     with_members=True, title=f"RESULTS OF RUN #{number}")
+
+    def get_cluster(cluster, run=None, offset=0):
+        data = load(run)
+        cluster = _tool_int(cluster, "cluster")
+        labels = data["arrays"]["labels"]
+        idx = np.flatnonzero(labels == cluster)
+        number = data["record"]["number"]
+        if idx.size == 0:
+            existing = ", ".join(str(c) for c in group_by_cluster(labels))
+            raise LookupError(f"Run #{number} has no cluster {cluster}. Its clusters: {existing}.")
+        names = [data["arrays"]["names"][i] for i in idx]
+        entry = next((e for e in (data["characterization"] or {}).get("clusters", []) if e["cluster"] == cluster), None)
+        stability = None
+        if data["record"].get("stability"):
+            details = read_json(os.path.join(data["dir"], "stability.json")) or {}
+            stability = next((c for c in details.get("clusters", []) if c["cluster"] == cluster), None)
+        membership = None
+        membership_path = os.path.join(data["dir"], "membership.npy")
+        if os.path.isfile(membership_path):
+            membership = float(np.load(membership_path)[idx].mean())
+        return llm.cluster_text(number, cluster, names, entry, stability, membership,
+                                max(0, _tool_int(offset or 0, "offset")))
+
+    def find_rows(query, run=None):
+        terms = [t.strip().lower() for t in str(query).split(",") if t.strip()]
+        if not terms:
+            raise ValueError("Give a row name or part of one.")
+        numbers = [number_of(run)] if run not in (None, "") else [n for n, r in sorted(runs.items())
+                                                                  if r.get("status") == "success"]
+        lines = []
+        for number in numbers:
+            data = load(number)
+            names, labels = data["arrays"]["names"], data["arrays"]["labels"]
+            hits = [(name, int(label)) for name, label in zip(names, labels.tolist())
+                    if any(term in str(name).lower() for term in terms)]
+            if not hits:
+                lines.append(f"- Run #{number}: no row matches.")
+                continue
+            shown = ", ".join(f"{name} -> {llm.cluster_label(label)}" for name, label in hits[:60])
+            more = f" ... and {len(hits) - 60} more matches" if len(hits) > 60 else ""
+            lines.append(f"- Run #{number} ({len(hits)} matching rows): {shown}{more}")
+        return f"ROWS MATCHING {', '.join(terms)!r}\n" + "\n".join(lines)
+
+    def compare_runs(run_a, run_b=None):
+        a, b = load(run_a), load(run_b)
+        return llm.comparison_text(a["record"]["number"], b["record"]["number"],
+                                   compare_labelings(a["arrays"], b["arrays"]))
+
+    def feature_by_cluster(feature=None, run=None):
+        data = load(run)
+        number = data["record"]["number"]
+        columns = (data["characterization"] or {}).get("columns") or \
+            (read_json(os.path.join(data["dir"], "result.json")) or {}).get("intensity_columns") or []
+        if not feature:
+            return f"FEATURES OF RUN #{number} ({len(columns)}): " + ", ".join(map(str, columns))
+        lookup = {str(c).lower(): j for j, c in enumerate(columns)}
+        j = lookup.get(str(feature).strip().lower())
+        if j is None:
+            similar = [str(c) for c in columns if str(feature).strip().lower() in str(c).lower()][:20]
+            raise LookupError(f"Run #{number} has no feature {feature!r}."
+                              + (f" Similar: {', '.join(similar)}." if similar else " Call without a feature to list them."))
+        values = np.asarray(data["arrays"]["profiles"][:, j], dtype=float)
+        lines = [f"FEATURE {columns[j]} IN RUN #{number} (preprocessed values that were clustered)"]
+        for cluster, idx in group_by_cluster(data["arrays"]["labels"]).items():
+            q1, median, q3 = np.nanpercentile(values[idx], [25, 50, 75])
+            lines.append(f"- {llm.cluster_label(cluster)} ({idx.size} rows): median {median:.3f}, "
+                         f"quartiles {q1:.3f}-{q3:.3f}, mean {np.nanmean(values[idx]):.3f}")
+        return "\n".join(lines)
+
+    functions = {f.__name__: f for f in (get_run_results, get_cluster, find_rows, compare_runs, feature_by_cluster)}
+
+    def call_tool(name, arguments):
+        function = functions.get(name)
+        if function is None:
+            raise LookupError(f"Unknown tool {name!r}. Tools: {', '.join(functions)}.")
+        return function(**arguments)
+
+    return call_tool
+
+
 @app.route('/api/assistant/status', methods=['GET'])
 def assistant_status():
     return jsonify(llm.status())
@@ -2809,8 +2939,8 @@ def assistant_status():
 
 @app.route('/api/sessions/<session_id>/runs/<run_id>/assistant', methods=['POST'])
 def run_assistant(session_id, run_id):
-    """Answers a question about the run; streams NDJSON lines {"delta": text} (or {"replace": whole answer}),
-    then {"done": true} or {"error": ...}."""
+    """Answers a question about the run or any other run of the session; streams NDJSON lines {"delta": text},
+    {"tool": note} or {"replace": whole answer}, then {"done": true} or {"error": ...}."""
     run_dir, record, result = load_finished_run(session_id, run_id, "explained")
     if run_dir is None:
         return result
@@ -2818,7 +2948,9 @@ def run_assistant(session_id, run_id):
         history = llm.clean_history((request.get_json(silent=True) or {}).get("messages"))
     except ValueError as e:
         return jsonify({"error": str(e), "code": "invalid_parameters"}), 400
-    context = assistant_context(get_session_dir(session_id), run_dir, record, result, history)
+    session_dir = get_session_dir(session_id)
+    context = assistant_context(session_dir, run_dir, record, result, history)
+    call_tool = assistant_tools(session_dir, record)
     if not ASSISTANT_STREAMS.acquire(blocking=False):
         return jsonify({"error": "The assistant is answering other questions right now.",
                         "hint": "Please ask again in a moment.", "code": "assistant_busy"}), 503
@@ -2832,8 +2964,9 @@ def run_assistant(session_id, run_id):
 
     def generate():
         try:
-            for kind, text in llm.stream_chat(context, history):
+            for kind, text in llm.stream_chat(context, history, call_tool):
                 # "replace": the model started repeating itself; the browser shows this shortened answer instead.
+                # "tool": a note on what the assistant looked up (another run, a cluster's members, ...).
                 yield json.dumps({kind: text}) + "\n"
             yield json.dumps({"done": True}) + "\n"
         except llm.AssistantUnavailable as e:
